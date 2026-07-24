@@ -558,6 +558,22 @@
                 if (!filename.toLowerCase().endsWith(ext)) filename += `.${ext}`;
                 
                 const file = new File([blob], filename, { type: blob.type });
+                
+                // Se for uma página HTML, pergunta se o usuário quer varrer o site ou só aquela página
+                if (ext === 'html' || ext === 'htm') {
+                    const htmlContent = await file.text();
+                    const querLivro = confirm("Este link é uma página web.\n\nVocê deseja tentar baixar APENAS esta página ou pedir para a IA tentar encontrar e baixar TODOS OS CAPÍTULOS do livro a partir deste site?");
+                    if (querLivro) {
+                        // Verifica se está logado para usar o Gemini
+                        if (!state.apiKey && !state.googleAccessToken) {
+                            alert("Para usar o Web Crawler Inteligente, você precisa primeiro clicar em 'Fazer Login no Google' na lateral para ativar a IA.");
+                            return;
+                        }
+                        await extractWebBook(url, htmlContent);
+                        return;
+                    }
+                }
+                
                 await handleFileSelection(file);
                 
             } catch (error) {
@@ -633,6 +649,142 @@
                 }
             });
             if (currentChunk) state.pages.push(currentChunk);
+        }
+
+        // --- Core Gemini Helper ---
+        async function callGeminiAPI(promptText, useJsonFormat = false) {
+            let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+            let headers = { 'Content-Type': 'application/json' };
+
+            if (state.apiKey) url += `?key=${state.apiKey}`;
+            else if (state.googleAccessToken) headers['Authorization'] = `Bearer ${state.googleAccessToken}`;
+            else throw new Error("Nenhuma credencial de autenticação encontrada para a IA.");
+            
+            const payload = {
+                contents: [{ parts: [{text: promptText}] }]
+            };
+            
+            if (useJsonFormat) {
+                payload.generationConfig = { responseMimeType: "application/json" };
+            }
+
+            const requestOptions = { method: 'POST', headers: headers, body: JSON.stringify(payload) };
+
+            let data;
+            const maxAttempts = 3;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                const response = await fetch(url, requestOptions);
+                data = await response.json().catch(() => ({}));
+                if (response.ok) break;
+
+                const apiMessage = data.error?.message || "Erro na API Gemini";
+                const isHighDemand = apiMessage.toLowerCase().includes("high demand") || apiMessage.toLowerCase().includes("overloaded");
+                const isTemporaryError = response.status === 429 || response.status >= 500 || isHighDemand;
+                
+                if (!isTemporaryError || attempt === maxAttempts) {
+                    throw new Error(apiMessage);
+                }
+
+                const retryAfterSeconds = Number(response.headers.get('Retry-After'));
+                const delayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 1000 * (2 ** (attempt - 1));
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+
+            const aiResponseParts = data.candidates?.[0]?.content?.parts;
+            if (!Array.isArray(aiResponseParts) || aiResponseParts.length === 0) {
+                const blockReason = data.promptFeedback?.blockReason;
+                throw new Error(blockReason ? `Bloqueado pela API (${blockReason}).` : "A API não retornou texto.");
+            }
+            return aiResponseParts.map(part => part.text || '').join('');
+        }
+
+        // --- AI Web Crawler ---
+        async function extractWebBook(baseUrl, initialHtml) {
+            document.getElementById('welcome-state').style.display = 'none';
+            const textLayer = document.getElementById('text-layer');
+            textLayer.style.display = 'block';
+            textLayer.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-brain text-4xl mb-4 text-indigo-500 animate-pulse"></i><br>A Inteligência Artificial está escaneando os links do site para montar o seu livro...</div>';
+            
+            try {
+                // 1. Extrair links da página
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(initialHtml, 'text/html');
+                const aTags = Array.from(doc.querySelectorAll('a'));
+                
+                const links = aTags.map(a => {
+                    let href = a.getAttribute('href');
+                    if (!href || href.startsWith('#') || href.startsWith('javascript:')) return null;
+                    try { href = new URL(href, baseUrl).href; } catch(e) { return null; }
+                    return { text: a.innerText.trim(), href };
+                }).filter(l => l && l.text.length > 2);
+                
+                if (links.length === 0) throw new Error("Nenhum link útil encontrado na página.");
+
+                // 2. Chamar o Gemini para filtrar links
+                const prompt = `Abaixo está uma lista de links extraídos de uma página (URL base: ${baseUrl}). 
+O usuário quer ler um livro ou uma série de capítulos hospedados nesse site. Analise os textos e as URLs e identifique QUAIS links apontam para os capítulos/partes do livro na ordem correta de leitura cronológica.
+ATENÇÃO: Ignore links de navegação geral (Home, Contato), redes sociais, propagandas ou páginas que não fazem parte do corpo de leitura.
+Retorne APENAS um array JSON contendo as strings das URLs completas (ex: ["url1", "url2"]). Não retorne mais nada além do JSON.
+
+Links:
+${JSON.stringify(links.slice(0, 150))}`;
+
+                const aiResponse = await callGeminiAPI(prompt, true);
+                let chapterUrls = [];
+                try {
+                    chapterUrls = JSON.parse(aiResponse);
+                } catch(e) {
+                    throw new Error("A IA falhou em analisar a estrutura dos capítulos do site.");
+                }
+
+                if (!Array.isArray(chapterUrls) || chapterUrls.length === 0) {
+                    throw new Error("A IA não conseguiu identificar os capítulos neste link.");
+                }
+
+                // Remove duplicatas
+                chapterUrls = [...new Set(chapterUrls)];
+                
+                // 3. Crawler: Baixar cada link
+                state.pages = [];
+                state.currentPage = 0;
+                
+                for (let i = 0; i < chapterUrls.length; i++) {
+                    const curl = chapterUrls[i];
+                    textLayer.innerHTML = `<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-3xl mb-4"></i><br>Baixando capítulo ${i + 1} de ${chapterUrls.length}...<br><span class="text-xs text-gray-400 mt-2 block">${curl}</span></div>`;
+                    
+                    const proxies = [
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent(curl)}`,
+                        `https://corsproxy.io/?${encodeURIComponent(curl)}`
+                    ];
+                    
+                    let response = null;
+                    for (const proxy of proxies) {
+                        try {
+                            const res = await fetch(proxy);
+                            if (res.ok) { response = res; break; }
+                        } catch(e) {}
+                    }
+                    if (!response) response = await fetch(curl).catch(()=>null);
+                    
+                    if (response && response.ok) {
+                        const htmlText = await response.text();
+                        // Parse as file to reuse processHTML
+                        const blob = new Blob([htmlText], { type: 'text/html' });
+                        const fakeFile = new File([blob], `chapter_${i}.html`, { type: 'text/html' });
+                        await processHTML(fakeFile);
+                    }
+                }
+                
+                document.getElementById('file-name').textContent = "Livro importado da Web";
+                document.getElementById('epub-viewer').style.display = 'none';
+                generateTOC();
+                renderCurrentState();
+                appendSystemMessage(`Livro da Web importado! A IA identificou e processou ${chapterUrls.length} capítulos.`);
+                
+            } catch (error) {
+                console.error(error);
+                textLayer.innerHTML = `<div class="text-red-500 text-center py-10">Erro no Web Crawler da IA: ${error.message}</div>`;
+            }
         }
 
         async function processWord(file) {
@@ -926,69 +1078,10 @@ Se for muito relevante e você identificar a resposta em uma página específica
 você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (Página X)]\` onde X é o número da página, baseando-se nas marcações de página presentes no texto. O front-end interceptará esse comando para criar um botão navegável.
             `;
 
-            // Call Gemini API using OAuth Bearer Token or API Key
+            // Call Gemini API using extracted helper
             try {
-                let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent`;
-                let headers = {
-                    'Content-Type': 'application/json'
-                };
-
-                if (state.apiKey) {
-                    url += `?key=${state.apiKey}`;
-                } else if (state.googleAccessToken) {
-                    headers['Authorization'] = `Bearer ${state.googleAccessToken}`;
-                } else {
-                    throw new Error("Nenhuma credencial de autenticação encontrada.");
-                }
-                
-                const requestOptions = {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [{text: promptText}]
-                        }]
-                    })
-                };
-
-                let data;
-                const maxAttempts = 3;
-                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    const response = await fetch(url, requestOptions);
-                    data = await response.json().catch(() => ({}));
-
-                    if (response.ok) break;
-
-                    const apiMessage = data.error?.message || "Erro na API Gemini";
-                    const isHighDemand = apiMessage.toLowerCase().includes("high demand") || apiMessage.toLowerCase().includes("overloaded");
-                    const isTemporaryError = response.status === 429 || response.status >= 500 || isHighDemand;
-                    
-                    if (!isTemporaryError || attempt === maxAttempts) {
-                        const retryHint = isTemporaryError
-                            ? " O serviço continua sobrecarregado após 3 tentativas. Aguarde um momento e tente novamente."
-                            : "";
-                        throw new Error(apiMessage + retryHint);
-                    }
-
-                    const retryAfterSeconds = Number(response.headers.get('Retry-After'));
-                    const delayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-                        ? retryAfterSeconds * 1000
-                        : 1000 * (2 ** (attempt - 1));
-                    appendSystemMessage(`O Gemini está ocupado. Nova tentativa ${attempt + 1} de ${maxAttempts}...`);
-                    await new Promise(resolve => setTimeout(resolve, delayMs));
-                }
-
-                const aiResponseParts = data.candidates?.[0]?.content?.parts;
-                if (!Array.isArray(aiResponseParts) || aiResponseParts.length === 0) {
-                    const blockReason = data.promptFeedback?.blockReason;
-                    throw new Error(blockReason
-                        ? `A resposta foi bloqueada pela API (${blockReason}).`
-                        : "A API não retornou uma resposta de texto.");
-                }
-                let aiResponse = aiResponseParts
-                    .map(part => part.text || '')
-                    .join('')
-                    .trim();
+                let aiResponse = await callGeminiAPI(promptText);
+                aiResponse = aiResponse.trim();
 
                 if (!aiResponse) {
                     throw new Error("A API retornou uma resposta vazia.");
