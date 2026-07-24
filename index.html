@@ -299,7 +299,8 @@
             GEMINI_API_KEY: '', 
             // Seu Client ID do Google Cloud para OAuth2 nativo
             GOOGLE_CLIENT_ID: '125726121952-2auhrjc0430gb5l2oulg8sfs3pt3enl2.apps.googleusercontent.com', 
-            GEMINI_MODEL: 'gemini-1.5-flash'
+            GEMINI_API_VERSION: 'v1beta',
+            GEMINI_MODEL: 'gemini-3.5-flash'
         };
 
         // --- Initialization & Auth ---
@@ -807,7 +808,7 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
 
             // Call Gemini API using OAuth Bearer Token or API Key
             try {
-                let url = `https://generativelanguage.googleapis.com/v1/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+                let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent`;
                 let headers = {
                     'Content-Type': 'application/json'
                 };
@@ -836,7 +837,21 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
                 }
 
                 const data = await response.json();
-                let aiResponse = data.candidates[0].content.parts[0].text;
+                const aiResponseParts = data.candidates?.[0]?.content?.parts;
+                if (!Array.isArray(aiResponseParts) || aiResponseParts.length === 0) {
+                    const blockReason = data.promptFeedback?.blockReason;
+                    throw new Error(blockReason
+                        ? `A resposta foi bloqueada pela API (${blockReason}).`
+                        : "A API não retornou uma resposta de texto.");
+                }
+                let aiResponse = aiResponseParts
+                    .map(part => part.text || '')
+                    .join('')
+                    .trim();
+
+                if (!aiResponse) {
+                    throw new Error("A API retornou uma resposta vazia.");
+                }
 
                 // Parse smart navigation commands
                 const navRegex = /\[Ver no livro \(Página (\d+)\)\]/g;
