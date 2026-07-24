@@ -99,6 +99,11 @@
             display: inline-flex;
         }
 
+        #mira-presentation-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         @media (max-width: 640px) {
             #text-layer:not(:empty) {
                 padding: 1.5rem 1.25rem 5rem;
@@ -234,7 +239,7 @@
                         <i class="fa-solid fa-download"></i>
                         <span class="hidden lg:inline">Salvar como</span>
                     </button>
-                    <button id="mira-presentation-btn" onclick="openMiraDialog()" class="hidden items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100 hover:border-cyan-300 transition-colors text-xs font-semibold whitespace-nowrap" title="Criar apresentação animada com MIRA" aria-label="Criar apresentação animada com MIRA">
+                    <button id="mira-presentation-btn" onclick="openMiraDialog()" class="items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100 hover:border-cyan-300 transition-colors text-xs font-semibold whitespace-nowrap" title="Carregue um livro para criar uma apresentação com MIRA" aria-label="Criar apresentação animada com MIRA" disabled>
                         <i class="fa-solid fa-display"></i>
                         <span class="hidden xl:inline">Criar apresentação</span>
                     </button>
@@ -968,6 +973,14 @@ ${source.slice(0, 50000)}
             });
         }
 
+        function setMiraPresentationAvailable(available) {
+            const button = document.getElementById('mira-presentation-btn');
+            button.disabled = !available;
+            button.title = available
+                ? 'Criar apresentação animada com MIRA'
+                : 'Carregue um livro para criar uma apresentação com MIRA';
+        }
+
         // --- File Processing ---
         async function handleFileSelection(file) {
             if (!file) return;
@@ -988,7 +1001,7 @@ ${source.slice(0, 50000)}
                 document.getElementById('epub-viewer').innerHTML = '';
             }
             document.getElementById('download-btn').classList.add('hidden');
-            document.getElementById('mira-presentation-btn').classList.add('hidden');
+            setMiraPresentationAvailable(false);
 
             const ext = file.name.split('.').pop().toLowerCase();
             state.fileType = ext;
@@ -1013,7 +1026,7 @@ ${source.slice(0, 50000)}
                 }
                 appendSystemMessage(`Documento "${file.name}" carregado com sucesso!`);
                 if (hasLoadedDocument()) {
-                    document.getElementById('mira-presentation-btn').classList.remove('hidden');
+                    setMiraPresentationAvailable(true);
                 }
                 updateTutorAvailability();
             } catch (error) {
@@ -1028,9 +1041,69 @@ ${source.slice(0, 50000)}
             handleFileSelection(e.target.files[0]);
         });
 
+        async function fetchWithTimeout(resource, timeoutMs = 12000) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(resource, { signal: controller.signal });
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        function showUrlImportFallback(url) {
+            const textLayer = document.getElementById('text-layer');
+            textLayer.innerHTML = '';
+
+            const panel = document.createElement('div');
+            panel.className = 'max-w-xl mx-auto my-10 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-gray-700 shadow-sm';
+
+            const title = document.createElement('h2');
+            title.className = 'text-xl font-bold text-gray-900 mb-3';
+            title.textContent = 'O site de origem bloqueou a importação direta';
+
+            const explanation = document.createElement('p');
+            explanation.className = 'mb-5 leading-relaxed';
+            explanation.textContent = 'Este PDF pode ser aberto normalmente, mas o servidor não permite que outro site o baixe automaticamente. Abra o arquivo, salve-o e selecione-o abaixo. Depois do carregamento, o botão MIRA será ativado.';
+
+            const actions = document.createElement('div');
+            actions.className = 'flex flex-wrap gap-3';
+
+            const openLink = document.createElement('a');
+            openLink.href = url;
+            openLink.target = '_blank';
+            openLink.rel = 'noopener noreferrer';
+            openLink.className = 'inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700';
+            openLink.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir PDF para baixar';
+
+            const uploadLabel = document.createElement('label');
+            uploadLabel.className = 'inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-300 bg-white px-4 py-2 text-sm font-semibold text-cyan-700 hover:bg-cyan-50';
+            uploadLabel.innerHTML = '<i class="fa-solid fa-upload"></i> Selecionar PDF baixado';
+
+            const uploadInput = document.createElement('input');
+            uploadInput.type = 'file';
+            uploadInput.accept = '.pdf,.epub,.docx,.doc,.txt,.xlsx,.xls';
+            uploadInput.className = 'hidden';
+            uploadInput.addEventListener('change', () => handleFileSelection(uploadInput.files[0]));
+            uploadLabel.appendChild(uploadInput);
+
+            actions.append(openLink, uploadLabel);
+            panel.append(title, explanation, actions);
+            textLayer.appendChild(panel);
+        }
+
         async function loadFromUrlPrompt() {
             const url = prompt("Cole o link direto para o livro (PDF, EPUB, TXT, DOCX):");
             if (!url) return;
+
+            let parsedUrl;
+            try {
+                parsedUrl = new URL(url);
+                if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error();
+            } catch {
+                alert('Informe um endereço válido começando com http:// ou https://');
+                return;
+            }
             
             document.getElementById('welcome-state').style.display = 'none';
             document.getElementById('text-layer').innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-3xl mb-4"></i><br>Baixando arquivo do link...</div>';
@@ -1038,24 +1111,35 @@ ${source.slice(0, 50000)}
             document.getElementById('text-layer').style.display = 'block';
             
             try {
-                const proxies = [
+                const routes = [
                     `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-                    `https://corsproxy.io/?${encodeURIComponent(url)}`
+                    `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+                    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+                    `https://cors.isomorphic-git.org/${url}`
                 ];
 
                 let response = null;
-                for (const proxy of proxies) {
-                    try {
-                        const res = await fetch(proxy);
-                        if (res.ok) { response = res; break; }
-                    } catch (e) { console.warn("Proxy falhou:", proxy); }
+                try {
+                    const directResponse = await fetchWithTimeout(url, 8000);
+                    if (directResponse.ok) response = directResponse;
+                } catch (e) {
+                    console.warn('Importação direta bloqueada:', e);
                 }
-                
+
                 if (!response) {
-                    response = await fetch(url);
+                    const attempts = routes.map(async (route) => {
+                        const res = await fetchWithTimeout(route);
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res;
+                    });
+                    try {
+                        response = await Promise.any(attempts);
+                    } catch (e) {
+                        console.warn('Todas as rotas alternativas falharam:', e);
+                    }
                 }
                 
-                if (!response.ok) throw new Error("Não foi possível acessar o link fornecido.");
+                if (!response) throw new Error('O servidor bloqueou o acesso por outros sites.');
                 
                 const blob = await response.blob();
                 
@@ -1094,7 +1178,7 @@ ${source.slice(0, 50000)}
                 
             } catch (error) {
                 console.error(error);
-                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao carregar o link: ${escapeHTML(error.message)}.<br><br>Certifique-se que o link aponta diretamente para o arquivo e não para uma página de visualização.</div>`;
+                showUrlImportFallback(parsedUrl.href);
             }
         }
 
@@ -1297,7 +1381,7 @@ ${JSON.stringify(links.slice(0, 150))}`;
                 renderCurrentState();
                 if (state.pages.length > 0) {
                     document.getElementById('download-btn').classList.remove('hidden');
-                    document.getElementById('mira-presentation-btn').classList.remove('hidden');
+                    setMiraPresentationAvailable(true);
                 }
                 appendSystemMessage(`Livro da Web importado! A IA identificou e processou ${chapterUrls.length} capítulos.`);
                 updateTutorAvailability();
