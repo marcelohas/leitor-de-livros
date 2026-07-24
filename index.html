@@ -300,7 +300,7 @@
             // Seu Client ID do Google Cloud para OAuth2 nativo
             GOOGLE_CLIENT_ID: '125726121952-2auhrjc0430gb5l2oulg8sfs3pt3enl2.apps.googleusercontent.com', 
             GEMINI_API_VERSION: 'v1beta',
-            GEMINI_MODEL: 'gemini-3.6-flash'
+            GEMINI_MODEL: 'gemini-1.5-flash'
         };
 
         // --- Initialization & Auth ---
@@ -839,9 +839,11 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
 
                     if (response.ok) break;
 
-                    const isTemporaryError = response.status === 429 || response.status === 503;
+                    const apiMessage = data.error?.message || "Erro na API Gemini";
+                    const isHighDemand = apiMessage.toLowerCase().includes("high demand") || apiMessage.toLowerCase().includes("overloaded");
+                    const isTemporaryError = response.status === 429 || response.status >= 500 || isHighDemand;
+                    
                     if (!isTemporaryError || attempt === maxAttempts) {
-                        const apiMessage = data.error?.message || "Erro na API Gemini";
                         const retryHint = isTemporaryError
                             ? " O serviço continua sobrecarregado após 3 tentativas. Aguarde um momento e tente novamente."
                             : "";
@@ -885,7 +887,11 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
 
             } catch (error) {
                 console.error(error);
-                appendMessage('ai', `<span class="text-red-500">Erro ao comunicar com a IA: ${error.message}</span>`);
+                let displayMessage = error.message;
+                if (displayMessage.toLowerCase().includes("high demand") || displayMessage.toLowerCase().includes("overloaded")) {
+                    displayMessage = "O serviço de Inteligência Artificial está sob alta demanda no momento. Aguarde alguns instantes e tente novamente.";
+                }
+                appendMessage('ai', `<span class="text-red-500">Erro ao comunicar com a IA: ${displayMessage}</span>`);
             } finally {
                 document.getElementById('send-btn').disabled = false;
             }
