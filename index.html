@@ -151,10 +151,15 @@
             <!-- Toolbar -->
             <div class="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-gray-50 shrink-0">
                 <div class="flex items-center gap-3">
-                    <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded shadow-sm text-sm font-medium transition-colors">
-                        <i class="fa-solid fa-upload mr-1"></i> Abrir Arquivo
-                        <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls">
-                    </label>
+                    <div class="flex border border-indigo-600 rounded shadow-sm overflow-hidden shrink-0">
+                        <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors border-r border-indigo-500 flex items-center">
+                            <i class="fa-solid fa-upload mr-1"></i> Arquivo
+                            <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls">
+                        </label>
+                        <button onclick="loadFromUrlPrompt()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors flex items-center" title="Colar Link">
+                            <i class="fa-solid fa-link"></i>
+                        </button>
+                    </div>
                     <span id="file-name" class="text-xs text-gray-500 truncate max-w-[120px] md:max-w-[200px]">Nenhum arquivo</span>
                 </div>
                 
@@ -461,8 +466,7 @@
         }
 
         // --- File Processing ---
-        document.getElementById('file-input').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
+        async function handleFileSelection(file) {
             if (!file) return;
 
             document.getElementById('file-name').textContent = file.name;
@@ -501,7 +505,51 @@
                 console.error(error);
                 document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao processar o arquivo: ${error.message}</div>`;
             }
+        }
+
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            handleFileSelection(e.target.files[0]);
         });
+
+        async function loadFromUrlPrompt() {
+            const url = prompt("Cole o link direto para o livro (PDF, EPUB, TXT, DOCX):");
+            if (!url) return;
+            
+            document.getElementById('welcome-state').style.display = 'none';
+            document.getElementById('text-layer').innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-3xl mb-4"></i><br>Baixando arquivo do link...</div>';
+            document.getElementById('epub-viewer').style.display = 'none';
+            document.getElementById('text-layer').style.display = 'block';
+            
+            try {
+                // Utilizando um proxy CORS confiável para permitir o download no navegador
+                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxyUrl);
+                
+                if (!response.ok) throw new Error("Não foi possível acessar o arquivo no link fornecido.");
+                
+                const blob = await response.blob();
+                
+                let ext = url.split('.').pop().toLowerCase().split('?')[0];
+                if (!['pdf', 'epub', 'docx', 'doc', 'txt', 'xlsx', 'xls'].includes(ext)) {
+                    const mime = blob.type.toLowerCase();
+                    if (mime.includes('pdf')) ext = 'pdf';
+                    else if (mime.includes('epub')) ext = 'epub';
+                    else if (mime.includes('word')) ext = 'docx';
+                    else if (mime.includes('excel') || mime.includes('spreadsheet')) ext = 'xlsx';
+                    else ext = 'txt';
+                }
+                
+                let filename = url.split('/').pop().split('?')[0] || `livro_online.${ext}`;
+                if (!filename.toLowerCase().endsWith(ext)) filename += `.${ext}`;
+                
+                const file = new File([blob], filename, { type: blob.type });
+                await handleFileSelection(file);
+                
+            } catch (error) {
+                console.error(error);
+                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao carregar o link: ${error.message}.<br><br>Certifique-se que o link aponta diretamente para o arquivo e não para uma página de visualização.</div>`;
+            }
+        }
 
         async function processPDF(file) {
             const arrayBuffer = await file.arrayBuffer();
