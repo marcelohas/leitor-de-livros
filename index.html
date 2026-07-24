@@ -807,7 +807,7 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
 
             // Call Gemini API using OAuth Bearer Token or API Key
             try {
-                let url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+                let url = `https://generativelanguage.googleapis.com/v1/models/${CONFIG.GEMINI_MODEL}:generateContent`;
                 let headers = {
                     'Content-Type': 'application/json'
                 };
