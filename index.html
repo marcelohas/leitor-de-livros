@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="application-version" content="mira-2026-07-24.1">
+    <meta name="application-version" content="mira-chat-2026-07-24.2">
     <title>Lumina Reader AI</title>
     
     <!-- Tailwind CSS -->
@@ -356,6 +356,9 @@
                 <button disabled onclick="sendQuickAction('Poderia resumir os principais pontos desta seção/página?')" class="quick-action whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Resumir Seção</button>
                 <button disabled onclick="sendQuickAction('Me explique este conceito de forma bem simples, como se eu tivesse 10 anos.')" class="quick-action whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Explicação Simples</button>
                 <button disabled onclick="sendQuickAction('Gere um pequeno quiz de fixação (3 perguntas) sobre o que estou lendo agora.')" class="quick-action whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Quiz de Fixação</button>
+                <button id="chat-mira-btn" disabled onclick="openLatestChatInMira()" class="whitespace-nowrap px-3 py-1.5 bg-cyan-50 text-cyan-700 border border-cyan-200 rounded-full text-xs font-semibold hover:bg-cyan-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" title="Selecione um trecho de uma resposta ou use a resposta mais recente">
+                    <i class="fa-solid fa-display mr-1"></i> Apresentação MIRA
+                </button>
             </div>
 
             <!-- Input Area -->
@@ -393,6 +396,10 @@
                     <label class="flex gap-3 p-3 rounded-xl border border-gray-200 has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-50 cursor-pointer">
                         <input type="radio" name="mira-source" value="selection" class="mt-1 accent-cyan-600">
                         <span><b class="block text-gray-800">Texto selecionado</b><small id="mira-selection-status" class="text-gray-500">Selecione um trecho no livro antes de abrir esta janela.</small></span>
+                    </label>
+                    <label class="flex gap-3 p-3 rounded-xl border border-gray-200 has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-50 cursor-pointer">
+                        <input type="radio" name="mira-source" value="chat" class="mt-1 accent-cyan-600">
+                        <span><b class="block text-gray-800">Resposta do Tutor</b><small id="mira-chat-status" class="text-gray-500">Converse com o Tutor e escolha uma resposta para apresentar.</small></span>
                     </label>
                     <label class="flex gap-3 p-3 rounded-xl border border-gray-200 has-[:checked]:border-cyan-500 has-[:checked]:bg-cyan-50 cursor-pointer">
                         <input type="radio" name="mira-source" value="page" class="mt-1 accent-cyan-600" checked>
@@ -435,6 +442,8 @@
             aiBusy: false,
             lastUserMessage: '',
             miraSelection: '',
+            miraChatText: '',
+            latestTutorResponse: '',
             generatedPresentation: null,
         };
 
@@ -734,19 +743,51 @@
             return state.miraSelection;
         }
 
-        function openMiraDialog() {
+        function captureChatSelection() {
+            const selection = window.getSelection();
+            const chatHistory = document.getElementById('chat-history');
+            if (
+                selection &&
+                !selection.isCollapsed &&
+                chatHistory.contains(selection.anchorNode) &&
+                chatHistory.contains(selection.focusNode)
+            ) {
+                return selection.toString().trim().slice(0, 30000);
+            }
+            return '';
+        }
+
+        function openLatestChatInMira() {
+            const selectedChatText = captureChatSelection();
+            state.miraChatText = selectedChatText || state.latestTutorResponse;
+            if (!state.miraChatText) {
+                appendSystemMessage('Converse com o Tutor antes de criar uma apresentação a partir da conversa.');
+                return;
+            }
+            openMiraDialog('chat');
+        }
+
+        function openMiraDialog(preferredSource = '') {
             if (!hasLoadedDocument()) {
                 appendSystemMessage('Abra um documento antes de criar uma apresentação.');
                 return;
             }
             const selection = captureMiraSelection();
             const selectionRadio = document.querySelector('input[name="mira-source"][value="selection"]');
+            const chatRadio = document.querySelector('input[name="mira-source"][value="chat"]');
             const status = document.getElementById('mira-selection-status');
+            const chatStatus = document.getElementById('mira-chat-status');
             selectionRadio.disabled = !selection;
             status.textContent = selection
                 ? `${selection.length.toLocaleString('pt-BR')} caracteres selecionados.`
                 : 'Selecione um trecho no livro antes de abrir esta janela.';
-            if (selection) selectionRadio.checked = true;
+            chatRadio.disabled = !state.miraChatText;
+            chatStatus.textContent = state.miraChatText
+                ? `${state.miraChatText.length.toLocaleString('pt-BR')} caracteres da conversa prontos para o MIRA.`
+                : 'Converse com o Tutor e escolha uma resposta para apresentar.';
+
+            if (preferredSource === 'chat' && state.miraChatText) chatRadio.checked = true;
+            else if (selection) selectionRadio.checked = true;
             else document.querySelector('input[name="mira-source"][value="page"]').checked = true;
             document.getElementById('mira-dialog-error').classList.add('hidden');
             const dialog = document.getElementById('mira-dialog');
@@ -784,6 +825,7 @@
 
         function getMiraSource(mode) {
             if (mode === 'selection') return state.miraSelection;
+            if (mode === 'chat') return state.miraChatText;
             if (state.fileType === 'epub') return getEpubVisibleText();
             if (mode === 'page' && state.pages.length) {
                 return pageHTMLToText(state.pages[state.currentPage]);
@@ -823,7 +865,7 @@
             const prompt = `
 Você é o planejador de apresentações do MIRA (Metáforas Inteligentes Responsivas e Animadas).
 Transforme o conteúdo delimitado abaixo em uma apresentação didática curta, coerente e fiel à fonte.
-O modo solicitado é: ${mode === 'summary' ? 'resumo global' : mode === 'selection' ? 'trecho selecionado' : 'página atual'}.
+O modo solicitado é: ${mode === 'summary' ? 'resumo global' : mode === 'selection' ? 'trecho selecionado' : mode === 'chat' ? 'resposta do Tutor escolhida pelo usuário' : 'página atual'}.
 
 Retorne SOMENTE JSON válido neste formato:
 {
@@ -859,7 +901,9 @@ ${source.slice(0, 50000)}
             if (!source) {
                 errorBox.textContent = sourceMode === 'selection'
                     ? 'Selecione um trecho do livro antes de gerar a apresentação.'
-                    : 'Não foi possível extrair texto desta página ou seção.';
+                    : sourceMode === 'chat'
+                        ? 'Selecione um trecho da resposta ou escolha uma resposta do Tutor.'
+                        : 'Não foi possível extrair texto desta página ou seção.';
                 errorBox.classList.remove('hidden');
                 return;
             }
@@ -993,6 +1037,10 @@ ${source.slice(0, 50000)}
             state.pages = [];
             state.currentPage = 0;
             state.fileType = null;
+            state.miraSelection = '';
+            state.miraChatText = '';
+            state.latestTutorResponse = '';
+            document.getElementById('chat-mira-btn').disabled = true;
             updateReadingProgress(0);
             updateTutorAvailability();
             if (state.epubBook) {
@@ -1664,22 +1712,54 @@ ${JSON.stringify(links.slice(0, 150))}`;
         }
 
         // --- Gemini AI Integration ---
-        function appendMessage(sender, htmlContent, isMarkdown = false) {
+        function appendMessage(sender, htmlContent, isMarkdown = false, addMiraAction = false) {
             const chatHistory = document.getElementById('chat-history');
             const div = document.createElement('div');
             div.className = `chat-message ${sender} p-3 rounded-lg text-sm shadow-sm ${sender === 'user' ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[90%]'}`;
-            
+
+            const messageBody = document.createElement('div');
+            messageBody.className = 'chat-message-body';
             if (isMarkdown) {
-                div.innerHTML = sanitizeHTML(marked.parse(htmlContent));
+                messageBody.innerHTML = sanitizeHTML(marked.parse(htmlContent));
             } else {
-                div.innerHTML = sanitizeHTML(htmlContent);
+                messageBody.innerHTML = sanitizeHTML(htmlContent);
             }
-            div.querySelectorAll('[data-jump-page]').forEach(button => {
+            div.appendChild(messageBody);
+            messageBody.querySelectorAll('[data-jump-page]').forEach(button => {
                 button.addEventListener('click', () => jumpToPage(Number(button.dataset.jumpPage)));
             });
+
+            if (addMiraAction) {
+                const actionBar = document.createElement('div');
+                actionBar.className = 'mt-3 pt-2 border-t border-cyan-100 flex items-center justify-between gap-2';
+
+                const hint = document.createElement('span');
+                hint.className = 'text-[10px] text-gray-400';
+                hint.textContent = 'Selecione um trecho ou use a resposta inteira';
+
+                const miraButton = document.createElement('button');
+                miraButton.type = 'button';
+                miraButton.className = 'shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-100';
+                miraButton.innerHTML = '<i class="fa-solid fa-display"></i> Gerar no MIRA';
+                miraButton.addEventListener('click', () => {
+                    const selection = window.getSelection();
+                    const selectedText = selection &&
+                        !selection.isCollapsed &&
+                        messageBody.contains(selection.anchorNode) &&
+                        messageBody.contains(selection.focusNode)
+                        ? selection.toString().trim()
+                        : '';
+                    state.miraChatText = (selectedText || messageBody.innerText).trim().slice(0, 30000);
+                    openMiraDialog('chat');
+                });
+
+                actionBar.append(hint, miraButton);
+                div.appendChild(actionBar);
+            }
             
             chatHistory.appendChild(div);
             chatHistory.scrollTop = chatHistory.scrollHeight;
+            return div;
         }
 
         function appendSystemMessage(text) {
@@ -1786,7 +1866,10 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
                     aiResponse = aiResponse.replace(match[0], buttonHtml);
                 }
 
-                appendMessage('ai', aiResponse, true);
+                const responseMessage = appendMessage('ai', aiResponse, true, true);
+                state.latestTutorResponse = responseMessage.querySelector('.chat-message-body').innerText.trim().slice(0, 30000);
+                state.miraChatText = state.latestTutorResponse;
+                document.getElementById('chat-mira-btn').disabled = false;
 
             } catch (error) {
                 console.error(error);
