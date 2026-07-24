@@ -161,6 +161,9 @@
                         </button>
                     </div>
                     <span id="file-name" class="text-xs text-gray-500 truncate max-w-[120px] md:max-w-[200px]">Nenhum arquivo</span>
+                    <button id="download-btn" onclick="downloadCurrentBook()" class="hidden text-gray-500 hover:text-indigo-600 transition-colors" title="Salvar Livro para leitura offline">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
                 </div>
                 
                 <div class="flex items-center gap-2">
@@ -482,6 +485,7 @@
                 state.epubBook = null;
                 document.getElementById('epub-viewer').innerHTML = '';
             }
+            document.getElementById('download-btn').classList.add('hidden');
 
             const ext = file.name.split('.').pop().toLowerCase();
             state.fileType = ext;
@@ -500,6 +504,9 @@
                     document.getElementById('text-layer').style.display = 'block';
                     generateTOC();
                     renderCurrentState();
+                    if (state.pages.length > 0) {
+                        document.getElementById('download-btn').classList.remove('hidden');
+                    }
                 }
                 appendSystemMessage(`Documento "${file.name}" carregado com sucesso!`);
             } catch (error) {
@@ -779,6 +786,9 @@ ${JSON.stringify(links.slice(0, 150))}`;
                 document.getElementById('epub-viewer').style.display = 'none';
                 generateTOC();
                 renderCurrentState();
+                if (state.pages.length > 0) {
+                    document.getElementById('download-btn').classList.remove('hidden');
+                }
                 appendSystemMessage(`Livro da Web importado! A IA identificou e processou ${chapterUrls.length} capítulos.`);
                 
             } catch (error) {
