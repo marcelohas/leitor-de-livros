@@ -16,6 +16,7 @@
     
     <!-- Marked.js (Markdown parsing for Chat) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     
     <!-- File Parsers -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -108,6 +109,16 @@
         #epub-viewer iframe {
             background: transparent !important;
         }
+
+        :focus-visible {
+            outline: 3px solid #818cf8;
+            outline-offset: 2px;
+        }
+
+        .quick-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body class="bg-gray-100 h-screen w-screen overflow-hidden flex flex-col theme-claro font-sans text-sm md:text-base">
@@ -119,7 +130,7 @@
                 <i class="fa-solid fa-book-open text-3xl text-indigo-600"></i>
             </div>
             <h1 class="text-3xl font-bold mb-2 text-gray-800">Lumina Reader AI</h1>
-            <p class="text-gray-500 mb-8">Conecte sua conta Google para habilitar o tutor pedagógico nativo com Gemini.</p>
+            <p class="text-gray-500 mb-6">Conecte sua conta Google para habilitar o tutor pedagógico nativo com Gemini.</p>
             
             <button id="google-login-btn" onclick="requestAuth()" class="flex items-center justify-center gap-3 w-full bg-white border border-gray-300 rounded-lg px-6 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors shadow-sm mb-4">
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-5 h-5" alt="Google Logo">
@@ -129,6 +140,9 @@
             <button onclick="skipAuth()" class="text-sm text-gray-400 hover:text-indigo-500 underline transition-colors">
                 Continuar sem Inteligência Artificial (Modo Offline)
             </button>
+            <p class="mt-6 text-xs leading-relaxed text-gray-400">
+                Seus arquivos são processados neste navegador. Ao conversar com o tutor, o texto do documento e sua pergunta são enviados ao Gemini.
+            </p>
         </div>
     </div>
 
@@ -156,12 +170,12 @@
                             <i class="fa-solid fa-upload mr-1"></i> Arquivo
                             <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls">
                         </label>
-                        <button onclick="loadFromUrlPrompt()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors flex items-center" title="Colar Link">
+                        <button onclick="loadFromUrlPrompt()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors flex items-center" title="Abrir livro por link" aria-label="Abrir livro por link">
                             <i class="fa-solid fa-link"></i>
                         </button>
                     </div>
                     <span id="file-name" class="text-xs text-gray-500 truncate max-w-[120px] md:max-w-[200px]">Nenhum arquivo</span>
-                    <button id="download-btn" onclick="downloadCurrentBook()" class="hidden text-gray-500 hover:text-indigo-600 transition-colors" title="Salvar Livro para leitura offline">
+                    <button id="download-btn" onclick="downloadCurrentBook()" class="hidden text-gray-500 hover:text-indigo-600 transition-colors" title="Salvar livro para leitura offline" aria-label="Salvar livro para leitura offline">
                         <i class="fa-solid fa-download"></i>
                     </button>
                 </div>
@@ -174,21 +188,21 @@
                     </div>
 
                     <!-- View Mode Toggle -->
-                    <button onclick="toggleViewMode()" id="view-mode-btn" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Alternar Modo (Paginado/Contínuo)">
+                    <button onclick="toggleViewMode()" id="view-mode-btn" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Alternar modo paginado ou contínuo" aria-label="Alternar modo paginado ou contínuo">
                         <i class="fa-solid fa-scroll"></i>
                     </button>
 
                     <!-- Settings Dropdown -->
-                    <div class="relative group">
-                        <button class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Aparência">
+                    <div class="relative">
+                        <button id="appearance-btn" onclick="toggleAppearanceMenu()" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Aparência" aria-label="Abrir configurações de aparência" aria-expanded="false" aria-controls="appearance-menu">
                             <i class="fa-solid fa-font"></i>
                         </button>
-                        <div class="absolute right-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-100 p-4 hidden group-hover:block z-50">
+                        <div id="appearance-menu" class="absolute right-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-100 p-4 hidden z-50" role="dialog" aria-label="Configurações de aparência">
                             <h4 class="text-xs font-bold text-gray-400 uppercase mb-3">Tamanho</h4>
                             <div class="flex items-center justify-between mb-4 bg-gray-50 rounded p-1">
-                                <button onclick="changeFontSize(-2)" class="px-3 hover:bg-white rounded"><i class="fa-solid fa-minus text-xs"></i></button>
+                                <button onclick="changeFontSize(-2)" class="px-3 hover:bg-white rounded" aria-label="Diminuir tamanho da fonte"><i class="fa-solid fa-minus text-xs"></i></button>
                                 <span id="font-size-display" class="text-sm font-medium">18px</span>
-                                <button onclick="changeFontSize(2)" class="px-3 hover:bg-white rounded"><i class="fa-solid fa-plus text-xs"></i></button>
+                                <button onclick="changeFontSize(2)" class="px-3 hover:bg-white rounded" aria-label="Aumentar tamanho da fonte"><i class="fa-solid fa-plus text-xs"></i></button>
                             </div>
                             
                             <h4 class="text-xs font-bold text-gray-400 uppercase mb-3">Fonte</h4>
@@ -210,7 +224,7 @@
                     </div>
                     
                     <!-- TOC Toggle -->
-                    <button onclick="toggleTOC()" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Sumário">
+                    <button onclick="toggleTOC()" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Sumário" aria-label="Abrir ou fechar sumário">
                         <i class="fa-solid fa-list-ul"></i>
                     </button>
                 </div>
@@ -230,9 +244,13 @@
                 <!-- Reading Container -->
                 <div class="flex-1 relative flex flex-col">
                     <div id="reader-content" class="reader-container flex-1 overflow-y-auto p-4 sm:p-6 md:px-8 pb-24">
-                        <div id="welcome-state" class="h-full flex flex-col items-center justify-center text-gray-400 text-center opacity-70">
-                            <i class="fa-solid fa-file-import text-6xl mb-4"></i>
-                            <p class="text-lg">Faça o upload de um PDF, EPUB, DOCX ou XLSX para começar a ler.</p>
+                        <div id="welcome-state" class="h-full flex flex-col items-center justify-center text-center px-6">
+                            <div class="w-20 h-20 rounded-2xl bg-indigo-50 text-indigo-500 flex items-center justify-center mb-5">
+                                <i class="fa-solid fa-book-open text-4xl"></i>
+                            </div>
+                            <h1 class="text-2xl font-bold text-gray-800 mb-2">Sua leitura, com contexto</h1>
+                            <p class="text-gray-500 max-w-md mb-4">Abra um livro para ler, pesquisar, resumir conceitos e criar quizzes com o Tutor Gemini.</p>
+                            <p class="text-xs text-gray-400">PDF, EPUB, DOCX, TXT, HTML e planilhas XLS/XLSX</p>
                         </div>
                         <div id="text-layer" class="max-w-3xl mx-auto leading-relaxed text-justify break-words"></div>
                         <div id="epub-viewer"></div>
@@ -240,9 +258,9 @@
                     
                     <!-- Paginator Overlay (Visible in Paged Mode) -->
                     <div id="paginator" class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur border border-gray-200 shadow-lg rounded-full px-4 py-2 flex items-center gap-4 hidden">
-                        <button onclick="prevPage()" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button onclick="prevPage()" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors" aria-label="Página anterior"><i class="fa-solid fa-chevron-left"></i></button>
                         <span id="page-indicator" class="text-sm font-medium text-gray-700 font-mono">1 / 1</span>
-                        <button onclick="nextPage()" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors"><i class="fa-solid fa-chevron-right"></i></button>
+                        <button onclick="nextPage()" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors" aria-label="Próxima página"><i class="fa-solid fa-chevron-right"></i></button>
                     </div>
                 </div>
             </div>
@@ -254,34 +272,35 @@
             <div class="h-14 border-b border-gray-200 flex items-center px-4 bg-white shrink-0">
                 <i class="fa-solid fa-sparkles text-indigo-500 mr-2"></i>
                 <h2 class="font-bold text-gray-800">Tutor Gemini</h2>
-                <div id="auth-status" class="ml-auto text-xs font-medium px-2 py-1 rounded bg-red-100 text-red-700">Offline</div>
+                <div id="auth-status" class="ml-auto text-xs font-medium px-2 py-1 rounded bg-red-100 text-red-700" role="status" aria-live="polite">Offline</div>
             </div>
             
             <!-- Chat History -->
             <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4">
                 <div class="chat-message ai p-3 rounded-lg text-gray-800 text-sm shadow-sm">
-                    Olá! Sou seu tutor pedagógico. Estou analisando o contexto da página que você está lendo. Como posso ajudar?
+                    Olá! Abra um documento para ativar minhas explicações, resumos e quizzes com contexto.
                 </div>
             </div>
 
             <!-- Quick Actions -->
             <div class="px-4 py-2 flex gap-2 overflow-x-auto shrink-0 bg-gray-50 border-t border-gray-100 no-scrollbar">
-                <button onclick="sendQuickAction('Poderia resumir os principais pontos desta seção/página?')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Resumir Seção</button>
-                <button onclick="sendQuickAction('Me explique este conceito de forma bem simples, como se eu tivesse 10 anos.')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Explicação Simples</button>
-                <button onclick="sendQuickAction('Gere um pequeno quiz de fixação (3 perguntas) sobre o que estou lendo agora.')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Quiz de Fixação</button>
+                <button disabled onclick="sendQuickAction('Poderia resumir os principais pontos desta seção/página?')" class="quick-action whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Resumir Seção</button>
+                <button disabled onclick="sendQuickAction('Me explique este conceito de forma bem simples, como se eu tivesse 10 anos.')" class="quick-action whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Explicação Simples</button>
+                <button disabled onclick="sendQuickAction('Gere um pequeno quiz de fixação (3 perguntas) sobre o que estou lendo agora.')" class="quick-action whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Quiz de Fixação</button>
             </div>
 
             <!-- Input Area -->
             <div class="p-4 bg-white border-t border-gray-200 shrink-0">
                 <div class="flex gap-2">
                     <input type="text" id="chat-input" placeholder="Faça uma pergunta sobre o livro..." class="flex-1 px-4 py-2 border border-gray-300 rounded-full text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400" disabled>
-                    <button id="send-btn" onclick="sendMessage()" class="w-10 h-10 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors" disabled>
+                    <button id="send-btn" onclick="sendMessage()" class="w-10 h-10 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors" aria-label="Enviar pergunta" disabled>
                         <i class="fa-solid fa-paper-plane"></i>
                     </button>
                 </div>
                 <div class="text-center mt-2">
                     <span class="text-[10px] text-gray-400">Contexto: Página Atual (<span id="context-indicator">N/A</span>)</span>
                 </div>
+                <p class="text-center mt-1 text-[10px] text-gray-400">O texto do documento é enviado ao Gemini somente ao fazer uma pergunta.</p>
             </div>
         </div>
     </div>
@@ -299,6 +318,9 @@
             epubBook: null,
             epubRendition: null,
             currentEpubCfi: null,
+            authenticated: false,
+            aiBusy: false,
+            lastUserMessage: '',
         };
 
         // --- Configuração Automática ---
@@ -315,16 +337,20 @@
         let tokenClient;
         window.onload = function () {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const savedTheme = localStorage.getItem('lumina-theme');
+            if (['theme-claro', 'theme-sepia', 'theme-menta', 'theme-dark', 'theme-oled'].includes(savedTheme)) {
+                document.body.classList.remove('theme-claro', 'theme-sepia', 'theme-menta', 'theme-dark', 'theme-oled');
+                document.body.classList.add(savedTheme);
+            }
             
             // Verifica pré-configuração por API Key
             if (CONFIG.GEMINI_API_KEY && CONFIG.GEMINI_API_KEY.trim() !== '') {
                 state.apiKey = CONFIG.GEMINI_API_KEY;
                 completeAuth('API_KEY');
-                return;
             }
 
             // Inicializa Google Identity Services para OAuth2
-            if (typeof google !== 'undefined' && google.accounts) {
+            if (!state.apiKey && typeof google !== 'undefined' && google.accounts) {
                 tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: CONFIG.GOOGLE_CLIENT_ID,
                     scope: 'https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform',
@@ -349,9 +375,10 @@
                         }
                     });
                     google.accounts.id.prompt((notification) => {
-                        if (notification.isNotDisplayed() || notification.isSkippedMomentum()) {
-                            // Se o One Tap falhar, podemos tentar silenciosamente
-                            // tokenClient.requestAccessToken({ prompt: '' });
+                        const notDisplayed = typeof notification.isNotDisplayed === 'function' && notification.isNotDisplayed();
+                        const skipped = typeof notification.isSkippedMoment === 'function' && notification.isSkippedMoment();
+                        if (notDisplayed || skipped) {
+                            setAIStatus('Conta desconectada', 'offline');
                         }
                     });
                 }
@@ -368,21 +395,66 @@
             document.getElementById('chat-input').addEventListener('keypress', function (e) {
                 if (e.key === 'Enter') sendMessage();
             });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') closeAppearanceMenu();
+            });
+            document.addEventListener('click', (event) => {
+                const menu = document.getElementById('appearance-menu');
+                const button = document.getElementById('appearance-btn');
+                if (!menu.classList.contains('hidden') && !menu.contains(event.target) && !button.contains(event.target)) {
+                    closeAppearanceMenu();
+                }
+            });
+            updateTutorAvailability();
         };
+
+        function setAIStatus(label, mode) {
+            const status = document.getElementById('auth-status');
+            const styles = {
+                offline: 'bg-red-100 text-red-700',
+                connected: 'bg-amber-100 text-amber-800',
+                available: 'bg-green-100 text-green-700',
+                busy: 'bg-blue-100 text-blue-700',
+                error: 'bg-red-100 text-red-700'
+            };
+            status.textContent = label;
+            status.className = `ml-auto text-xs font-medium px-2 py-1 rounded ${styles[mode] || styles.offline}`;
+        }
+
+        function hasLoadedDocument() {
+            return state.fileType === 'epub' ? Boolean(state.epubRendition) : state.pages.length > 0;
+        }
+
+        function updateTutorAvailability() {
+            const hasCredentials = state.authenticated && Boolean(state.apiKey || state.googleAccessToken);
+            const hasDocument = hasLoadedDocument();
+            const enabled = hasCredentials && hasDocument && !state.aiBusy;
+            const input = document.getElementById('chat-input');
+            input.disabled = !enabled;
+            input.placeholder = !hasCredentials
+                ? 'Conecte sua conta Google para usar o tutor'
+                : !hasDocument
+                    ? 'Abra um documento para ativar o tutor'
+                    : state.aiBusy ? 'O tutor está preparando a resposta...' : 'Faça uma pergunta sobre o livro...';
+            document.getElementById('send-btn').disabled = !enabled;
+            document.querySelectorAll('.quick-action').forEach(button => { button.disabled = !enabled; });
+
+            if (state.aiBusy) setAIStatus('IA pensando', 'busy');
+            else if (!hasCredentials) setAIStatus('Offline', 'offline');
+            else if (!hasDocument) setAIStatus('Conta conectada', 'connected');
+            else setAIStatus('IA disponível', 'available');
+        }
 
         function completeAuth(method) {
             document.getElementById('auth-overlay').style.opacity = '0';
             setTimeout(() => { document.getElementById('auth-overlay').style.display = 'none'; }, 500);
             
-            const status = document.getElementById('auth-status');
-            status.textContent = 'Online';
-            status.className = 'ml-auto text-xs font-medium px-2 py-1 rounded bg-green-100 text-green-700';
-            
-            document.getElementById('chat-input').disabled = false;
-            document.getElementById('send-btn').disabled = false;
+            state.authenticated = true;
+            updateTutorAvailability();
             
             let msg = method === 'API_KEY' ? "Conectado via Chave de API!" : "Autenticação com Google bem-sucedida!";
-            appendSystemMessage(msg + " Como posso ajudar na sua leitura hoje?");
+            appendSystemMessage(msg + " Abra um documento para ativar o tutor contextual.");
         }
 
         function requestAuth() {
@@ -394,9 +466,11 @@
         }
 
         function skipAuth() {
+            state.authenticated = false;
             document.getElementById('auth-overlay').style.opacity = '0';
             setTimeout(() => { document.getElementById('auth-overlay').style.display = 'none'; }, 500);
             appendSystemMessage("Atenção: Você pulou a autenticação. A Inteligência Artificial (Gemini) está desativada. O aplicativo funcionará apenas como E-Reader.");
+            updateTutorAvailability();
         }
 
         // --- UI Interactions ---
@@ -452,11 +526,43 @@
         function setTheme(themeClass) {
             document.body.classList.remove('theme-claro', 'theme-sepia', 'theme-menta', 'theme-dark', 'theme-oled');
             document.body.classList.add(themeClass);
+            localStorage.setItem('lumina-theme', themeClass);
         }
 
         function toggleTOC() {
             const sidebar = document.getElementById('toc-sidebar');
             sidebar.classList.toggle('hidden');
+        }
+
+        function toggleAppearanceMenu() {
+            const menu = document.getElementById('appearance-menu');
+            const button = document.getElementById('appearance-btn');
+            const willOpen = menu.classList.contains('hidden');
+            menu.classList.toggle('hidden', !willOpen);
+            button.setAttribute('aria-expanded', String(willOpen));
+        }
+
+        function closeAppearanceMenu() {
+            document.getElementById('appearance-menu').classList.add('hidden');
+            document.getElementById('appearance-btn').setAttribute('aria-expanded', 'false');
+        }
+
+        function downloadCurrentBook() {
+            if (state.pages.length === 0) return;
+            const title = document.getElementById('file-name').textContent || 'Livro';
+            const safePages = state.pages.map((page, index) =>
+                `<section class="page" id="pagina-${index + 1}">${sanitizeHTML(page)}</section>`
+            ).join('\n');
+            const offlineBook = `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHTML(title)}</title><style>body{max-width:780px;margin:40px auto;padding:0 24px;font:18px/1.7 Georgia,serif;color:#1f2937}.page{margin-bottom:4rem}img{max-width:100%}table{border-collapse:collapse;width:100%}td,th{border:1px solid #d1d5db;padding:.4rem}</style>
+</head><body><h1>${escapeHTML(title)}</h1>${safePages}</body></html>`;
+            const blob = new Blob([offlineBook], { type: 'text/html;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${title.replace(/\.[^.]+$/, '').replace(/[^\p{L}\p{N}_-]+/gu, '_') || 'livro'}_offline.html`;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(link.href), 1000);
         }
 
         function toggleViewMode() {
@@ -466,6 +572,20 @@
             }
             state.viewMode = state.viewMode === 'paged' ? 'continuous' : 'paged';
             renderCurrentState();
+        }
+
+        function escapeHTML(value) {
+            const element = document.createElement('div');
+            element.textContent = String(value ?? '');
+            return element.innerHTML;
+        }
+
+        function sanitizeHTML(html) {
+            return DOMPurify.sanitize(html, {
+                USE_PROFILES: { html: true },
+                FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+                FORBID_ATTR: ['style']
+            });
         }
 
         // --- File Processing ---
@@ -480,6 +600,7 @@
             state.pages = [];
             state.currentPage = 0;
             state.fileType = null;
+            updateTutorAvailability();
             if (state.epubBook) {
                 state.epubBook.destroy();
                 state.epubBook = null;
@@ -509,9 +630,12 @@
                     }
                 }
                 appendSystemMessage(`Documento "${file.name}" carregado com sucesso!`);
+                updateTutorAvailability();
             } catch (error) {
                 console.error(error);
-                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao processar o arquivo: ${error.message}</div>`;
+                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao processar o arquivo: ${escapeHTML(error.message)}</div>`;
+                state.fileType = null;
+                updateTutorAvailability();
             }
         }
 
@@ -585,7 +709,7 @@
                 
             } catch (error) {
                 console.error(error);
-                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao carregar o link: ${error.message}.<br><br>Certifique-se que o link aponta diretamente para o arquivo e não para uma página de visualização.</div>`;
+                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao carregar o link: ${escapeHTML(error.message)}.<br><br>Certifique-se que o link aponta diretamente para o arquivo e não para uma página de visualização.</div>`;
             }
         }
 
@@ -599,7 +723,7 @@
                 // Simple joining, in a real app we'd preserve layout better or use HTML layer
                 const text = textContent.items.map(item => item.str).join(' ');
                 // Wrap in paragraphs roughly
-                const htmlContent = text.split(/(?<=\.)\s+/).map(p => `<p class="mb-4">${p}</p>`).join('');
+                const htmlContent = text.split(/(?<=\.)\s+/).map(p => `<p class="mb-4">${escapeHTML(p)}</p>`).join('');
                 state.pages.push(htmlContent);
             }
         }
@@ -629,16 +753,16 @@
                     if (text.length > 0) {
                         const tag = el.tagName.toLowerCase();
                         if (tag.startsWith('h')) {
-                            paragraphs.push(`<${tag} class="font-bold my-4 ${tag==='h1'?'text-2xl':tag==='h2'?'text-xl':'text-lg'}">${text}</${tag}>`);
+                            paragraphs.push(`<${tag} class="font-bold my-4 ${tag==='h1'?'text-2xl':tag==='h2'?'text-xl':'text-lg'}">${escapeHTML(text)}</${tag}>`);
                         } else {
-                            paragraphs.push(`<p class="mb-4">${text}</p>`);
+                            paragraphs.push(`<p class="mb-4">${escapeHTML(text)}</p>`);
                         }
                     }
                 });
             } else {
                 const text = mainContent.innerText || "";
                 text.split('\n\n').forEach(p => {
-                    if (p.trim()) paragraphs.push(`<p class="mb-4">${p.trim().replace(/\n/g, '<br>')}</p>`);
+                    if (p.trim()) paragraphs.push(`<p class="mb-4">${escapeHTML(p.trim()).replace(/\n/g, '<br>')}</p>`);
                 });
             }
             
@@ -757,7 +881,7 @@ ${JSON.stringify(links.slice(0, 150))}`;
                 
                 for (let i = 0; i < chapterUrls.length; i++) {
                     const curl = chapterUrls[i];
-                    textLayer.innerHTML = `<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-3xl mb-4"></i><br>Baixando capítulo ${i + 1} de ${chapterUrls.length}...<br><span class="text-xs text-gray-400 mt-2 block">${curl}</span></div>`;
+                    textLayer.innerHTML = `<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-3xl mb-4"></i><br>Baixando capítulo ${i + 1} de ${chapterUrls.length}...<br><span class="text-xs text-gray-400 mt-2 block">${escapeHTML(curl)}</span></div>`;
                     
                     const proxies = [
                         `https://api.allorigins.win/raw?url=${encodeURIComponent(curl)}`,
@@ -790,10 +914,11 @@ ${JSON.stringify(links.slice(0, 150))}`;
                     document.getElementById('download-btn').classList.remove('hidden');
                 }
                 appendSystemMessage(`Livro da Web importado! A IA identificou e processou ${chapterUrls.length} capítulos.`);
+                updateTutorAvailability();
                 
             } catch (error) {
                 console.error(error);
-                textLayer.innerHTML = `<div class="text-red-500 text-center py-10">Erro no Web Crawler da IA: ${error.message}</div>`;
+                textLayer.innerHTML = `<div class="text-red-500 text-center py-10">Erro no Web Crawler da IA: ${escapeHTML(error.message)}</div>`;
             }
         }
 
@@ -803,7 +928,7 @@ ${JSON.stringify(links.slice(0, 150))}`;
             // Split the huge HTML into arbitrary pages (e.g., by H1/H2 or chars)
             // For simplicity, chunk by roughly 2000 characters keeping HTML tags intact using a very simple approach
             const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = result.value;
+            tempDiv.innerHTML = sanitizeHTML(result.value);
             let currentChunk = '';
             let currentLen = 0;
             
@@ -821,7 +946,7 @@ ${JSON.stringify(links.slice(0, 150))}`;
 
         async function processTXT(file) {
             const text = await file.text();
-            const paragraphs = text.split('\n\n').map(p => `<p class="mb-4">${p.replace(/\n/g, '<br>')}</p>`);
+            const paragraphs = text.split('\n\n').map(p => `<p class="mb-4">${escapeHTML(p).replace(/\n/g, '<br>')}</p>`);
             
             let currentChunk = '';
             let currentLen = 0;
@@ -842,9 +967,10 @@ ${JSON.stringify(links.slice(0, 150))}`;
             const workbook = XLSX.read(arrayBuffer, {type: 'array'});
             
             workbook.SheetNames.forEach(sheetName => {
-                const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[sheetName], { id: `sheet-${sheetName}` });
+                const safeSheetName = escapeHTML(sheetName);
+                const htmlStr = sanitizeHTML(XLSX.utils.sheet_to_html(workbook.Sheets[sheetName]));
                 // Wrap table in Tailwind classes
-                const styledHtml = htmlStr.replace('<table', `<h2 class="text-xl font-bold mb-4">${sheetName}</h2><table class="w-full text-left border-collapse border border-gray-300"`).replace(/<td/g, '<td class="border border-gray-300 px-2 py-1"').replace(/<th/g, '<th class="border border-gray-300 px-2 py-1 bg-gray-100"');
+                const styledHtml = htmlStr.replace('<table', `<h2 class="text-xl font-bold mb-4">${safeSheetName}</h2><table class="w-full text-left border-collapse border border-gray-300"`).replace(/<td/g, '<td class="border border-gray-300 px-2 py-1"').replace(/<th/g, '<th class="border border-gray-300 px-2 py-1 bg-gray-100"');
                 state.pages.push(`<div class="overflow-x-auto">${styledHtml}</div>`);
             });
         }
@@ -873,7 +999,12 @@ ${JSON.stringify(links.slice(0, 150))}`;
                 nav.forEach(navItem => {
                     const li = document.createElement('li');
                     li.className = 'py-1 border-b border-gray-100';
-                    li.innerHTML = `<a href="#" onclick="navigateEpub('${navItem.href}'); return false;" class="hover:text-indigo-600">${navItem.label}</a>`;
+                    const link = document.createElement('button');
+                    link.type = 'button';
+                    link.className = 'hover:text-indigo-600 text-left w-full';
+                    link.textContent = navItem.label;
+                    link.addEventListener('click', () => navigateEpub(navItem.href));
+                    li.appendChild(link);
                     tocList.appendChild(li);
                 });
             });
@@ -893,14 +1024,14 @@ ${JSON.stringify(links.slice(0, 150))}`;
             if (state.pages.length === 0) return;
 
             if (state.viewMode === 'paged') {
-                container.innerHTML = state.pages[state.currentPage];
+                container.innerHTML = sanitizeHTML(state.pages[state.currentPage]);
                 paginator.style.display = 'flex';
                 document.getElementById('page-indicator').textContent = `${state.currentPage + 1} / ${state.pages.length}`;
                 document.getElementById('context-indicator').textContent = `Página ${state.currentPage + 1}`;
                 document.getElementById('reader-content').scrollTop = 0;
             } else {
                 // Continuous Mode
-                container.innerHTML = state.pages.map((p, i) => `<div id="page-${i}" class="mb-12">${p}</div>`).join('');
+                container.innerHTML = state.pages.map((p, i) => `<div id="page-${i}" class="mb-12">${sanitizeHTML(p)}</div>`).join('');
                 paginator.style.display = 'none';
                 document.getElementById('context-indicator').textContent = `Documento Inteiro`;
             }
@@ -982,7 +1113,36 @@ ${JSON.stringify(links.slice(0, 150))}`;
         }
 
         // --- Search and Highlight ---
+        function highlightVisibleText(query) {
+            const root = document.getElementById('text-layer');
+            const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(escapedQuery, 'gi');
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            const matches = [];
+            let node;
+            while ((node = walker.nextNode())) {
+                if (node.parentElement?.closest('mark') || !regex.test(node.nodeValue)) continue;
+                regex.lastIndex = 0;
+                matches.push(node);
+            }
+            matches.forEach(textNode => {
+                const fragment = document.createDocumentFragment();
+                let lastIndex = 0;
+                textNode.nodeValue.replace(regex, (match, offset) => {
+                    fragment.appendChild(document.createTextNode(textNode.nodeValue.slice(lastIndex, offset)));
+                    const mark = document.createElement('mark');
+                    mark.textContent = match;
+                    fragment.appendChild(mark);
+                    lastIndex = offset + match.length;
+                    return match;
+                });
+                fragment.appendChild(document.createTextNode(textNode.nodeValue.slice(lastIndex)));
+                textNode.replaceWith(fragment);
+            });
+        }
+
         function performSearch(query) {
+            query = query.trim();
             if (!query) return;
             
             if (state.fileType === 'epub') {
@@ -1000,15 +1160,13 @@ ${JSON.stringify(links.slice(0, 150))}`;
                 if (tempDiv.textContent.toLowerCase().includes(lowerQuery)) {
                     foundIndex = i;
                     
-                    // Add <mark> tags (simplified approach, might break HTML tags if not careful)
-                    const regex = new RegExp(`(${query})`, 'gi');
-                    state.pages[i] = state.pages[i].replace(regex, '<mark>$1</mark>');
                     break;
                 }
             }
 
             if (foundIndex !== -1) {
                 jumpToPage(foundIndex);
+                highlightVisibleText(query);
                 appendSystemMessage(`Encontrei "${query}" na página ${foundIndex + 1}. Navegando...`);
             } else {
                 appendSystemMessage(`Não encontrei "${query}" no documento.`);
@@ -1022,17 +1180,43 @@ ${JSON.stringify(links.slice(0, 150))}`;
             div.className = `chat-message ${sender} p-3 rounded-lg text-sm shadow-sm ${sender === 'user' ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[90%]'}`;
             
             if (isMarkdown) {
-                div.innerHTML = marked.parse(htmlContent);
+                div.innerHTML = sanitizeHTML(marked.parse(htmlContent));
             } else {
-                div.innerHTML = htmlContent;
+                div.innerHTML = sanitizeHTML(htmlContent);
             }
+            div.querySelectorAll('[data-jump-page]').forEach(button => {
+                button.addEventListener('click', () => jumpToPage(Number(button.dataset.jumpPage)));
+            });
             
             chatHistory.appendChild(div);
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
 
         function appendSystemMessage(text) {
-            appendMessage('ai', `<i>${text}</i>`);
+            appendMessage('ai', `<i>${escapeHTML(text)}</i>`);
+        }
+
+        function appendErrorMessage(text) {
+            const chatHistory = document.getElementById('chat-history');
+            const div = document.createElement('div');
+            div.className = 'chat-message ai p-3 rounded-lg text-sm shadow-sm mr-auto max-w-[90%]';
+            const message = document.createElement('p');
+            message.className = 'text-red-600 mb-2';
+            message.textContent = text;
+            const retryButton = document.createElement('button');
+            retryButton.type = 'button';
+            retryButton.className = 'text-xs bg-white text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded hover:bg-indigo-50';
+            retryButton.textContent = 'Tentar novamente';
+            retryButton.addEventListener('click', retryLastMessage);
+            div.append(message, retryButton);
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        function retryLastMessage() {
+            if (!state.lastUserMessage || state.aiBusy) return;
+            document.getElementById('chat-input').value = state.lastUserMessage;
+            sendMessage();
         }
 
         function sendQuickAction(actionText) {
@@ -1045,14 +1229,20 @@ ${JSON.stringify(links.slice(0, 150))}`;
             const message = input.value.trim();
             if (!message) return;
 
-            if (!state.googleAccessToken) {
+            if (!state.googleAccessToken && !state.apiKey) {
                 alert("Você precisa se conectar com o Google primeiro.");
+                return;
+            }
+            if (!hasLoadedDocument()) {
+                appendSystemMessage("Abra um documento antes de conversar com o tutor.");
                 return;
             }
 
             input.value = '';
+            state.lastUserMessage = message;
             appendMessage('user', message);
-            document.getElementById('send-btn').disabled = true;
+            state.aiBusy = true;
+            updateTutorAvailability();
 
             // Prepare Context
             let contextText = "Nenhum documento carregado.";
@@ -1078,7 +1268,7 @@ Abaixo está o texto COMPLETO do documento que o usuário está lendo. A página
 ATENÇÃO: Você recebeu o livro inteiro no contexto abaixo. Você É TOTALMENTE CAPAZ de fazer resumos globais, análises completas da obra e conectar pontos de diferentes capítulos. NUNCA diga que o livro é muito extenso para ser processado.
 
 --- INÍCIO DO LIVRO ---
-${contextText}
+${contextText.substring(0, 50000)}
 --- FIM DO LIVRO ---
 
 Pergunta do usuário: ${message}
@@ -1102,7 +1292,7 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
                 let match;
                 while ((match = navRegex.exec(aiResponse)) !== null) {
                     const pageTarget = parseInt(match[1]) - 1; // 0-indexed internally
-                    const buttonHtml = `<br><button onclick="jumpToPage(${pageTarget})" class="mt-2 text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200 transition-colors"><i class="fa-solid fa-location-arrow mr-1"></i> Ir para a Página ${match[1]}</button>`;
+                    const buttonHtml = `<br><button type="button" data-jump-page="${pageTarget}" class="mt-2 text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200 transition-colors"><i class="fa-solid fa-location-arrow mr-1"></i> Ir para a Página ${match[1]}</button>`;
                     aiResponse = aiResponse.replace(match[0], buttonHtml);
                 }
 
@@ -1114,9 +1304,11 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
                 if (displayMessage.toLowerCase().includes("high demand") || displayMessage.toLowerCase().includes("overloaded")) {
                     displayMessage = "O serviço de Inteligência Artificial está sob alta demanda no momento. Aguarde alguns instantes e tente novamente.";
                 }
-                appendMessage('ai', `<span class="text-red-500">Erro ao comunicar com a IA: ${displayMessage}</span>`);
+                setAIStatus('IA indisponível', 'error');
+                appendErrorMessage(`Não foi possível obter a resposta: ${displayMessage}`);
             } finally {
-                document.getElementById('send-btn').disabled = false;
+                state.aiBusy = false;
+                updateTutorAvailability();
             }
         }
     </script>
