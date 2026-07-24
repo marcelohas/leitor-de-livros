@@ -194,7 +194,7 @@
 
                     <!-- Settings Dropdown -->
                     <div class="relative">
-                        <button id="appearance-btn" onclick="toggleAppearanceMenu()" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Aparência" aria-label="Abrir configurações de aparência" aria-expanded="false" aria-controls="appearance-menu">
+                        <button id="appearance-btn" onclick="toggleAppearanceMenu(event)" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Aparência" aria-label="Abrir configurações de aparência" aria-expanded="false" aria-controls="appearance-menu">
                             <i class="fa-solid fa-font"></i>
                         </button>
                         <div id="appearance-menu" class="absolute right-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-100 p-4 hidden z-50" role="dialog" aria-label="Configurações de aparência">
@@ -374,13 +374,7 @@
                             tokenClient.requestAccessToken({ prompt: '' });
                         }
                     });
-                    google.accounts.id.prompt((notification) => {
-                        const notDisplayed = typeof notification.isNotDisplayed === 'function' && notification.isNotDisplayed();
-                        const skipped = typeof notification.isSkippedMoment === 'function' && notification.isSkippedMoment();
-                        if (notDisplayed || skipped) {
-                            setAIStatus('Conta desconectada', 'offline');
-                        }
-                    });
+                    google.accounts.id.prompt();
                 }
             }
 
@@ -534,7 +528,8 @@
             sidebar.classList.toggle('hidden');
         }
 
-        function toggleAppearanceMenu() {
+        function toggleAppearanceMenu(event) {
+            event?.stopPropagation();
             const menu = document.getElementById('appearance-menu');
             const button = document.getElementById('appearance-btn');
             const willOpen = menu.classList.contains('hidden');
