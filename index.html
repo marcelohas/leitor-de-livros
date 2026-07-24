@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina Reader AI</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    
+    <!-- Marked.js (Markdown parsing for Chat) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- File Parsers -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        :root {
+            --reader-bg: #ffffff;
+            --reader-text: #1a202c;
+            --reader-font: 'Georgia', serif;
+            --reader-font-size: 18px;
+        }
+
+        /* Themes */
+        body.theme-claro { --reader-bg: #ffffff; --reader-text: #1a202c; }
+        body.theme-sepia { --reader-bg: #f4ecd8; --reader-text: #5b4636; }
+        body.theme-menta { --reader-bg: #e6f7e9; --reader-text: #1b4332; }
+        body.theme-dark { --reader-bg: #1a202c; --reader-text: #cbd5e1; }
+        body.theme-oled { --reader-bg: #000000; --reader-text: #e2e8f0; }
+
+        /* Typography */
+        body.font-serif { --reader-font: 'Georgia', serif; }
+        body.font-sans { --reader-font: 'Inter', 'Segoe UI', sans-serif; }
+        body.font-mono { --reader-font: 'Courier New', monospace; }
+
+        .reader-container {
+            background-color: var(--reader-bg);
+            color: var(--reader-text);
+            font-family: var(--reader-font);
+            font-size: var(--reader-font-size);
+            line-height: 1.6;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* Custom Scrollbar for Reader */
+        .reader-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .reader-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .reader-container::-webkit-scrollbar-thumb {
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 4px;
+        }
+        body.theme-dark .reader-container::-webkit-scrollbar-thumb,
+        body.theme-oled .reader-container::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.2);
+        }
+
+        mark {
+            background-color: #fde047; /* Tailwind yellow-300 */
+            color: #1a202c;
+            padding: 0.1em 0.2em;
+            border-radius: 0.2em;
+            animation: highlight-pulse 2s ease-out;
+        }
+
+        @keyframes highlight-pulse {
+            0% { background-color: #fbbf24; }
+            100% { background-color: #fde047; }
+        }
+
+        .chat-message.ai {
+            background-color: #f3f4f6;
+            border-left: 4px solid #6366f1;
+        }
+        .chat-message.user {
+            background-color: #e0e7ff;
+            text-align: right;
+        }
+        
+        /* Markdown Chat Styles */
+        .chat-message.ai p { margin-bottom: 0.5rem; }
+        .chat-message.ai pre { background: #1f2937; color: #f8fafc; padding: 0.5rem; border-radius: 0.25rem; overflow-x: auto; margin-bottom: 0.5rem; }
+        .chat-message.ai code { font-family: monospace; background: #e2e8f0; padding: 0.1rem 0.2rem; border-radius: 0.25rem; font-size: 0.9em; }
+        .chat-message.ai pre code { background: none; color: inherit; padding: 0; }
+        
+        .nav-button:hover { background-color: rgba(0,0,0,0.05); }
+        body.theme-dark .nav-button:hover, body.theme-oled .nav-button:hover { background-color: rgba(255,255,255,0.1); }
+        
+        #epub-viewer {
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+        #epub-viewer iframe {
+            background: transparent !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen w-screen overflow-hidden flex flex-col theme-claro font-sans text-sm md:text-base">
+
+    <!-- Auth Overlay -->
+    <div id="auth-overlay" class="absolute inset-0 z-50 bg-gray-900 bg-opacity-75 flex items-center justify-center backdrop-blur-sm transition-opacity duration-500">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-md text-center transform transition-all">
+            <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-4">
+                <i class="fa-solid fa-book-open text-3xl text-indigo-600"></i>
+            </div>
+            <h1 class="text-3xl font-bold mb-2 text-gray-800">Lumina Reader AI</h1>
+            <p class="text-gray-500 mb-8">Conecte sua conta Google para habilitar o tutor pedagógico nativo com Gemini.</p>
+            
+            <button id="google-login-btn" onclick="requestAuth()" class="flex items-center justify-center gap-3 w-full bg-white border border-gray-300 rounded-lg px-6 py-3 text-gray-700 font-medium hover:bg-gray-50 transition-colors shadow-sm mb-4">
+                <img src="https://www.svgrepo.com/show/475656/google-color.svg" class="w-5 h-5" alt="Google Logo">
+                Conectar Conta Google
+            </button>
+            
+            <button onclick="skipAuth()" class="text-sm text-gray-400 hover:text-indigo-500 underline transition-colors">
+                Continuar sem Inteligência Artificial (Modo Offline)
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile Tab Bar -->
+    <div class="md:hidden flex bg-white border-b border-gray-200 z-10 shadow-sm">
+        <button onclick="switchTab('reader')" id="tab-reader" class="flex-1 py-3 text-center font-medium text-indigo-600 border-b-2 border-indigo-600 transition-colors">
+            <i class="fa-solid fa-book mr-2"></i>Livro
+        </button>
+        <button onclick="switchTab('ai')" id="tab-ai" class="flex-1 py-3 text-center font-medium text-gray-500 border-b-2 border-transparent transition-colors">
+            <i class="fa-solid fa-robot mr-2"></i>Tutor IA
+        </button>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="flex flex-1 overflow-hidden relative">
+        
+        <!-- Left Panel: Reader (60% on Desktop, 100% on Mobile when active) -->
+        <div id="reader-panel" class="w-full md:w-[60%] flex flex-col h-full bg-white shadow-xl z-20 transition-all duration-300">
+            
+            <!-- Toolbar -->
+            <div class="h-14 border-b border-gray-200 flex items-center justify-between px-4 bg-gray-50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded shadow-sm text-sm font-medium transition-colors">
+                        <i class="fa-solid fa-upload mr-1"></i> Abrir Arquivo
+                        <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls">
+                    </label>
+                    <span id="file-name" class="text-xs text-gray-500 truncate max-w-[120px] md:max-w-[200px]">Nenhum arquivo</span>
+                </div>
+                
+                <div class="flex items-center gap-2">
+                    <!-- Search -->
+                    <div class="relative hidden sm:block">
+                        <input type="text" id="search-input" placeholder="Buscar no livro..." class="pl-8 pr-3 py-1.5 rounded-full border border-gray-300 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-40">
+                        <i class="fa-solid fa-search absolute left-3 top-2 text-gray-400 text-xs"></i>
+                    </div>
+
+                    <!-- View Mode Toggle -->
+                    <button onclick="toggleViewMode()" id="view-mode-btn" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Alternar Modo (Paginado/Contínuo)">
+                        <i class="fa-solid fa-scroll"></i>
+                    </button>
+
+                    <!-- Settings Dropdown -->
+                    <div class="relative group">
+                        <button class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Aparência">
+                            <i class="fa-solid fa-font"></i>
+                        </button>
+                        <div class="absolute right-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-100 p-4 hidden group-hover:block z-50">
+                            <h4 class="text-xs font-bold text-gray-400 uppercase mb-3">Tamanho</h4>
+                            <div class="flex items-center justify-between mb-4 bg-gray-50 rounded p-1">
+                                <button onclick="changeFontSize(-2)" class="px-3 hover:bg-white rounded"><i class="fa-solid fa-minus text-xs"></i></button>
+                                <span id="font-size-display" class="text-sm font-medium">18px</span>
+                                <button onclick="changeFontSize(2)" class="px-3 hover:bg-white rounded"><i class="fa-solid fa-plus text-xs"></i></button>
+                            </div>
+                            
+                            <h4 class="text-xs font-bold text-gray-400 uppercase mb-3">Fonte</h4>
+                            <div class="flex gap-2 mb-4">
+                                <button onclick="setTypography('font-sans')" class="flex-1 py-1 border rounded hover:bg-gray-50 font-sans">Sans</button>
+                                <button onclick="setTypography('font-serif')" class="flex-1 py-1 border rounded hover:bg-gray-50 font-serif border-indigo-500 bg-indigo-50">Serif</button>
+                                <button onclick="setTypography('font-mono')" class="flex-1 py-1 border rounded hover:bg-gray-50 font-mono">Mono</button>
+                            </div>
+
+                            <h4 class="text-xs font-bold text-gray-400 uppercase mb-3">Tema</h4>
+                            <div class="flex gap-2 flex-wrap justify-center">
+                                <button onclick="setTheme('theme-claro')" class="w-8 h-8 rounded-full border border-gray-300 bg-white" title="Claro"></button>
+                                <button onclick="setTheme('theme-sepia')" class="w-8 h-8 rounded-full border border-gray-300 bg-[#f4ecd8]" title="Sépia"></button>
+                                <button onclick="setTheme('theme-menta')" class="w-8 h-8 rounded-full border border-gray-300 bg-[#e6f7e9]" title="Menta"></button>
+                                <button onclick="setTheme('theme-dark')" class="w-8 h-8 rounded-full border border-gray-600 bg-[#1a202c]" title="Dark"></button>
+                                <button onclick="setTheme('theme-oled')" class="w-8 h-8 rounded-full border border-gray-700 bg-black" title="OLED"></button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- TOC Toggle -->
+                    <button onclick="toggleTOC()" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Sumário">
+                        <i class="fa-solid fa-list-ul"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Reader Area -->
+            <div class="flex-1 flex overflow-hidden relative">
+                
+                <!-- Table of Contents Sidebar -->
+                <div id="toc-sidebar" class="w-64 bg-gray-50 border-r border-gray-200 overflow-y-auto hidden flex-shrink-0">
+                    <div class="p-4 border-b border-gray-200 font-bold text-gray-700">Sumário</div>
+                    <ul id="toc-list" class="p-2 text-sm text-gray-600">
+                        <li class="p-2 text-gray-400 italic">Abra um arquivo para ver o sumário.</li>
+                    </ul>
+                </div>
+
+                <!-- Reading Container -->
+                <div class="flex-1 relative flex flex-col">
+                    <div id="reader-content" class="reader-container flex-1 overflow-y-auto p-8 md:p-12 lg:px-24">
+                        <div id="welcome-state" class="h-full flex flex-col items-center justify-center text-gray-400 text-center opacity-70">
+                            <i class="fa-solid fa-file-import text-6xl mb-4"></i>
+                            <p class="text-lg">Faça o upload de um PDF, EPUB, DOCX ou XLSX para começar a ler.</p>
+                        </div>
+                        <div id="text-layer" class="max-w-4xl mx-auto leading-relaxed"></div>
+                        <div id="epub-viewer"></div>
+                    </div>
+                    
+                    <!-- Paginator Overlay (Visible in Paged Mode) -->
+                    <div id="paginator" class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur border border-gray-200 shadow-lg rounded-full px-4 py-2 flex items-center gap-4 hidden">
+                        <button onclick="prevPage()" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors"><i class="fa-solid fa-chevron-left"></i></button>
+                        <span id="page-indicator" class="text-sm font-medium text-gray-700 font-mono">1 / 1</span>
+                        <button onclick="nextPage()" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-600 transition-colors"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: AI Tutor (40% on Desktop, hidden on Mobile initially) -->
+        <div id="ai-panel" class="w-full md:w-[40%] flex flex-col h-full bg-gray-50 border-l border-gray-200 hidden md:flex shrink-0">
+            <!-- Header -->
+            <div class="h-14 border-b border-gray-200 flex items-center px-4 bg-white shrink-0">
+                <i class="fa-solid fa-sparkles text-indigo-500 mr-2"></i>
+                <h2 class="font-bold text-gray-800">Tutor Gemini</h2>
+                <div id="auth-status" class="ml-auto text-xs font-medium px-2 py-1 rounded bg-red-100 text-red-700">Offline</div>
+            </div>
+            
+            <!-- Chat History -->
+            <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-4">
+                <div class="chat-message ai p-3 rounded-lg text-gray-800 text-sm shadow-sm">
+                    Olá! Sou seu tutor pedagógico. Estou analisando o contexto da página que você está lendo. Como posso ajudar?
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="px-4 py-2 flex gap-2 overflow-x-auto shrink-0 bg-gray-50 border-t border-gray-100 no-scrollbar">
+                <button onclick="sendQuickAction('Poderia resumir os principais pontos desta seção/página?')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Resumir Seção</button>
+                <button onclick="sendQuickAction('Me explique este conceito de forma bem simples, como se eu tivesse 10 anos.')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Explicação Simples</button>
+                <button onclick="sendQuickAction('Gere um pequeno quiz de fixação (3 perguntas) sobre o que estou lendo agora.')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-medium hover:bg-indigo-100 transition-colors">Quiz de Fixação</button>
+            </div>
+
+            <!-- Input Area -->
+            <div class="p-4 bg-white border-t border-gray-200 shrink-0">
+                <div class="flex gap-2">
+                    <input type="text" id="chat-input" placeholder="Faça uma pergunta sobre o livro..." class="flex-1 px-4 py-2 border border-gray-300 rounded-full text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400" disabled>
+                    <button id="send-btn" onclick="sendMessage()" class="w-10 h-10 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors" disabled>
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="text-[10px] text-gray-400">Contexto: Página Atual (<span id="context-indicator">N/A</span>)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        // --- State Management ---
+        const state = {
+            googleAccessToken: null,
+            apiKey: null,
+            fileType: null,
+            pages: [], // Array of page text/html
+            currentPage: 0,
+            viewMode: 'paged', // 'paged' or 'continuous'
+            epubBook: null,
+            epubRendition: null,
+            currentEpubCfi: null,
+        };
+
+        // --- Configuração Automática ---
+        const CONFIG = {
+            // Se preenchido, pula o OAuth e usa a chave diretamente (útil para testes rápidos)
+            GEMINI_API_KEY: '', 
+            // Seu Client ID do Google Cloud para OAuth2 nativo
+            GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID', 
+            GEMINI_MODEL: 'gemini-2.5-flash'
+        };
+
+        // --- Initialization & Auth ---
+        let tokenClient;
+        window.onload = function () {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            
+            // Verifica pré-configuração por API Key
+            if (CONFIG.GEMINI_API_KEY && CONFIG.GEMINI_API_KEY.trim() !== '') {
+                state.apiKey = CONFIG.GEMINI_API_KEY;
+                completeAuth('API_KEY');
+                return;
+            }
+
+            // Inicializa Google Identity Services para OAuth2
+            if (typeof google !== 'undefined' && google.accounts) {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CONFIG.GOOGLE_CLIENT_ID,
+                    scope: 'https://www.googleapis.com/auth/generative-language.retriever https://www.googleapis.com/auth/cloud-platform',
+                    callback: (tokenResponse) => {
+                        if (tokenResponse && tokenResponse.access_token) {
+                            state.googleAccessToken = tokenResponse.access_token;
+                            completeAuth('OAUTH');
+                        }
+                    },
+                });
+
+                // Tenta autenticação silenciosa/One Tap se o Client ID foi configurado
+                if (CONFIG.GOOGLE_CLIENT_ID && CONFIG.GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID') {
+                    // Exibe o One Tap para UX fluida
+                    google.accounts.id.initialize({
+                        client_id: CONFIG.GOOGLE_CLIENT_ID,
+                        auto_select: true,
+                        callback: (response) => {
+                            // O One Tap retorna um JWT. Precisamos de Access Token para a API.
+                            // Assim que o usuário é reconhecido pelo One Tap, solicitamos o token
+                            tokenClient.requestAccessToken({ prompt: '' });
+                        }
+                    });
+                    google.accounts.id.prompt((notification) => {
+                        if (notification.isNotDisplayed() || notification.isSkippedMomentum()) {
+                            // Se o One Tap falhar, podemos tentar silenciosamente
+                            // tokenClient.requestAccessToken({ prompt: '' });
+                        }
+                    });
+                }
+            }
+
+            // Setup Search Listener
+            document.getElementById('search-input').addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') {
+                    performSearch(this.value);
+                }
+            });
+
+            // Setup Chat Listener
+            document.getElementById('chat-input').addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') sendMessage();
+            });
+        };
+
+        function completeAuth(method) {
+            document.getElementById('auth-overlay').style.opacity = '0';
+            setTimeout(() => { document.getElementById('auth-overlay').style.display = 'none'; }, 500);
+            
+            const status = document.getElementById('auth-status');
+            status.textContent = 'Online';
+            status.className = 'ml-auto text-xs font-medium px-2 py-1 rounded bg-green-100 text-green-700';
+            
+            document.getElementById('chat-input').disabled = false;
+            document.getElementById('send-btn').disabled = false;
+            
+            let msg = method === 'API_KEY' ? "Conectado via Chave de API!" : "Autenticação com Google bem-sucedida!";
+            appendSystemMessage(msg + " Como posso ajudar na sua leitura hoje?");
+        }
+
+        function requestAuth() {
+            if (tokenClient) {
+                tokenClient.requestAccessToken();
+            } else {
+                alert("Google Identity Services library not loaded.");
+            }
+        }
+
+        function skipAuth() {
+            document.getElementById('auth-overlay').style.opacity = '0';
+            setTimeout(() => { document.getElementById('auth-overlay').style.display = 'none'; }, 500);
+            appendSystemMessage("Atenção: Você pulou a autenticação. A Inteligência Artificial (Gemini) está desativada. O aplicativo funcionará apenas como E-Reader.");
+        }
+
+        // --- UI Interactions ---
+        function switchTab(tab) {
+            const readerPanel = document.getElementById('reader-panel');
+            const aiPanel = document.getElementById('ai-panel');
+            const tabReader = document.getElementById('tab-reader');
+            const tabAi = document.getElementById('tab-ai');
+
+            if (tab === 'reader') {
+                readerPanel.classList.remove('hidden');
+                aiPanel.classList.add('hidden');
+                tabReader.classList.add('text-indigo-600', 'border-indigo-600');
+                tabReader.classList.remove('text-gray-500', 'border-transparent');
+                tabAi.classList.add('text-gray-500', 'border-transparent');
+                tabAi.classList.remove('text-indigo-600', 'border-indigo-600');
+            } else {
+                readerPanel.classList.add('hidden');
+                aiPanel.classList.remove('hidden', 'md:flex');
+                aiPanel.classList.add('flex');
+                tabAi.classList.add('text-indigo-600', 'border-indigo-600');
+                tabAi.classList.remove('text-gray-500', 'border-transparent');
+                tabReader.classList.add('text-gray-500', 'border-transparent');
+                tabReader.classList.remove('text-indigo-600', 'border-indigo-600');
+            }
+        }
+
+        function changeFontSize(delta) {
+            let root = document.documentElement;
+            let currentSize = parseInt(getComputedStyle(root).getPropertyValue('--reader-font-size'));
+            let newSize = currentSize + delta;
+            if (newSize >= 12 && newSize <= 32) {
+                root.style.setProperty('--reader-font-size', newSize + 'px');
+                document.getElementById('font-size-display').textContent = newSize + 'px';
+            }
+        }
+
+        function setTypography(fontClass) {
+            document.body.classList.remove('font-serif', 'font-sans', 'font-mono');
+            document.body.classList.add(fontClass);
+            
+            // Update active state in UI
+            const buttons = document.querySelectorAll('[onclick^="setTypography"]');
+            buttons.forEach(btn => {
+                if(btn.getAttribute('onclick').includes(fontClass)) {
+                    btn.classList.add('border-indigo-500', 'bg-indigo-50');
+                } else {
+                    btn.classList.remove('border-indigo-500', 'bg-indigo-50');
+                }
+            });
+        }
+
+        function setTheme(themeClass) {
+            document.body.classList.remove('theme-claro', 'theme-sepia', 'theme-menta', 'theme-dark', 'theme-oled');
+            document.body.classList.add(themeClass);
+        }
+
+        function toggleTOC() {
+            const sidebar = document.getElementById('toc-sidebar');
+            sidebar.classList.toggle('hidden');
+        }
+
+        function toggleViewMode() {
+            if (state.fileType === 'epub') {
+                alert("Modo de visualização no EPUB é gerenciado internamente.");
+                return;
+            }
+            state.viewMode = state.viewMode === 'paged' ? 'continuous' : 'paged';
+            renderCurrentState();
+        }
+
+        // --- File Processing ---
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('file-name').textContent = file.name;
+            document.getElementById('welcome-state').style.display = 'none';
+            document.getElementById('text-layer').innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-3xl mb-4"></i><br>Processando documento...</div>';
+            
+            // Reset state
+            state.pages = [];
+            state.currentPage = 0;
+            state.fileType = null;
+            if (state.epubBook) {
+                state.epubBook.destroy();
+                state.epubBook = null;
+                document.getElementById('epub-viewer').innerHTML = '';
+            }
+
+            const ext = file.name.split('.').pop().toLowerCase();
+            state.fileType = ext;
+
+            try {
+                if (ext === 'pdf') await processPDF(file);
+                else if (ext === 'docx' || ext === 'doc') await processWord(file);
+                else if (ext === 'epub') await processEPUB(file);
+                else if (ext === 'xlsx' || ext === 'xls') await processExcel(file);
+                else if (ext === 'txt') await processTXT(file);
+                else throw new Error("Formato não suportado");
+
+                if (ext !== 'epub') {
+                    document.getElementById('epub-viewer').style.display = 'none';
+                    document.getElementById('text-layer').style.display = 'block';
+                    generateTOC();
+                    renderCurrentState();
+                }
+                appendSystemMessage(`Documento "${file.name}" carregado com sucesso!`);
+            } catch (error) {
+                console.error(error);
+                document.getElementById('text-layer').innerHTML = `<div class="text-red-500 text-center py-10">Erro ao processar o arquivo: ${error.message}</div>`;
+            }
+        });
+
+        async function processPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                // Simple joining, in a real app we'd preserve layout better or use HTML layer
+                const text = textContent.items.map(item => item.str).join(' ');
+                // Wrap in paragraphs roughly
+                const htmlContent = text.split(/(?<=\.)\s+/).map(p => `<p class="mb-4">${p}</p>`).join('');
+                state.pages.push(htmlContent);
+            }
+        }
+
+        async function processWord(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.convertToHtml({arrayBuffer: arrayBuffer});
+            // Split the huge HTML into arbitrary pages (e.g., by H1/H2 or chars)
+            // For simplicity, chunk by roughly 2000 characters keeping HTML tags intact using a very simple approach
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = result.value;
+            let currentChunk = '';
+            let currentLen = 0;
+            
+            Array.from(tempDiv.children).forEach(child => {
+                currentChunk += child.outerHTML;
+                currentLen += child.textContent.length;
+                if (currentLen > 1500) {
+                    state.pages.push(currentChunk);
+                    currentChunk = '';
+                    currentLen = 0;
+                }
+            });
+            if (currentChunk) state.pages.push(currentChunk);
+        }
+
+        async function processTXT(file) {
+            const text = await file.text();
+            const paragraphs = text.split('\n\n').map(p => `<p class="mb-4">${p.replace(/\n/g, '<br>')}</p>`);
+            
+            let currentChunk = '';
+            let currentLen = 0;
+            paragraphs.forEach(p => {
+                currentChunk += p;
+                currentLen += p.length;
+                if (currentLen > 1500) {
+                    state.pages.push(currentChunk);
+                    currentChunk = '';
+                    currentLen = 0;
+                }
+            });
+            if (currentChunk) state.pages.push(currentChunk);
+        }
+
+        async function processExcel(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const workbook = XLSX.read(arrayBuffer, {type: 'array'});
+            
+            workbook.SheetNames.forEach(sheetName => {
+                const htmlStr = XLSX.utils.sheet_to_html(workbook.Sheets[sheetName], { id: `sheet-${sheetName}` });
+                // Wrap table in Tailwind classes
+                const styledHtml = htmlStr.replace('<table', `<h2 class="text-xl font-bold mb-4">${sheetName}</h2><table class="w-full text-left border-collapse border border-gray-300"`).replace(/<td/g, '<td class="border border-gray-300 px-2 py-1"').replace(/<th/g, '<th class="border border-gray-300 px-2 py-1 bg-gray-100"');
+                state.pages.push(`<div class="overflow-x-auto">${styledHtml}</div>`);
+            });
+        }
+
+        async function processEPUB(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            document.getElementById('text-layer').style.display = 'none';
+            document.getElementById('paginator').style.display = 'flex';
+            const viewer = document.getElementById('epub-viewer');
+            viewer.style.display = 'block';
+            viewer.innerHTML = ''; // Clear
+
+            state.epubBook = ePub(arrayBuffer);
+            state.epubRendition = state.epubBook.renderTo("epub-viewer", {
+                width: "100%",
+                height: "100%",
+                spread: "none"
+            });
+            
+            await state.epubRendition.display();
+            
+            // Generate TOC for EPUB
+            state.epubBook.loaded.navigation.then(nav => {
+                const tocList = document.getElementById('toc-list');
+                tocList.innerHTML = '';
+                nav.forEach(navItem => {
+                    const li = document.createElement('li');
+                    li.className = 'py-1 border-b border-gray-100';
+                    li.innerHTML = `<a href="#" onclick="navigateEpub('${navItem.href}'); return false;" class="hover:text-indigo-600">${navItem.label}</a>`;
+                    tocList.appendChild(li);
+                });
+            });
+
+            state.epubRendition.on("relocated", function(location){
+                state.currentEpubCfi = location.start.cfi;
+                document.getElementById('page-indicator').textContent = location.start.index + 1; // Simplified indicator
+                document.getElementById('context-indicator').textContent = `Local: ${location.start.index + 1}`;
+            });
+        }
+
+        // --- Reader Engine ---
+        function renderCurrentState() {
+            const container = document.getElementById('text-layer');
+            const paginator = document.getElementById('paginator');
+            
+            if (state.pages.length === 0) return;
+
+            if (state.viewMode === 'paged') {
+                container.innerHTML = state.pages[state.currentPage];
+                paginator.style.display = 'flex';
+                document.getElementById('page-indicator').textContent = `${state.currentPage + 1} / ${state.pages.length}`;
+                document.getElementById('context-indicator').textContent = `Página ${state.currentPage + 1}`;
+                document.getElementById('reader-content').scrollTop = 0;
+            } else {
+                // Continuous Mode
+                container.innerHTML = state.pages.map((p, i) => `<div id="page-${i}" class="mb-12">${p}</div>`).join('');
+                paginator.style.display = 'none';
+                document.getElementById('context-indicator').textContent = `Documento Inteiro`;
+            }
+        }
+
+        function nextPage() {
+            if (state.fileType === 'epub') {
+                state.epubRendition.next();
+            } else {
+                if (state.currentPage < state.pages.length - 1) {
+                    state.currentPage++;
+                    renderCurrentState();
+                }
+            }
+        }
+
+        function prevPage() {
+            if (state.fileType === 'epub') {
+                state.epubRendition.prev();
+            } else {
+                if (state.currentPage > 0) {
+                    state.currentPage--;
+                    renderCurrentState();
+                }
+            }
+        }
+
+        function navigateEpub(href) {
+            state.epubRendition.display(href);
+        }
+
+        function jumpToPage(pageIndex) {
+            if (state.fileType === 'epub') return; // Handled differently
+            
+            if (pageIndex >= 0 && pageIndex < state.pages.length) {
+                if (state.viewMode === 'paged') {
+                    state.currentPage = pageIndex;
+                    renderCurrentState();
+                } else {
+                    const el = document.getElementById(`page-${pageIndex}`);
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+        }
+
+        // --- TOC Generation (Non-EPUB) ---
+        function generateTOC() {
+            const tocList = document.getElementById('toc-list');
+            tocList.innerHTML = '';
+            
+            // Very naive TOC generation looking for h1, h2, or strong tags at start of pages
+            let foundAny = false;
+            
+            state.pages.forEach((pageHTML, index) => {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = pageHTML;
+                const heading = tempDiv.querySelector('h1, h2, h3');
+                if (heading && heading.textContent.trim().length > 0) {
+                    foundAny = true;
+                    const li = document.createElement('li');
+                    li.className = 'py-1 border-b border-gray-100 cursor-pointer hover:text-indigo-600 truncate';
+                    li.textContent = heading.textContent.trim();
+                    li.onclick = () => jumpToPage(index);
+                    tocList.appendChild(li);
+                }
+            });
+
+            if (!foundAny) {
+                tocList.innerHTML = '<li class="p-2 text-gray-400 italic">Nenhum capítulo identificado.</li>';
+                // Fallback: list pages every 10 pages
+                for(let i=0; i<state.pages.length; i+=10) {
+                     const li = document.createElement('li');
+                     li.className = 'py-1 border-b border-gray-100 cursor-pointer hover:text-indigo-600 truncate';
+                     li.textContent = `Página ${i+1}`;
+                     li.onclick = () => jumpToPage(i);
+                     tocList.appendChild(li);
+                }
+            }
+        }
+
+        // --- Search and Highlight ---
+        function performSearch(query) {
+            if (!query) return;
+            
+            if (state.fileType === 'epub') {
+                alert("A busca no EPUB não está implementada nesta demonstração.");
+                return;
+            }
+
+            const lowerQuery = query.toLowerCase();
+            let foundIndex = -1;
+
+            // Find the first page with the query
+            for (let i = 0; i < state.pages.length; i++) {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = state.pages[i];
+                if (tempDiv.textContent.toLowerCase().includes(lowerQuery)) {
+                    foundIndex = i;
+                    
+                    // Add <mark> tags (simplified approach, might break HTML tags if not careful)
+                    const regex = new RegExp(`(${query})`, 'gi');
+                    state.pages[i] = state.pages[i].replace(regex, '<mark>$1</mark>');
+                    break;
+                }
+            }
+
+            if (foundIndex !== -1) {
+                jumpToPage(foundIndex);
+                appendSystemMessage(`Encontrei "${query}" na página ${foundIndex + 1}. Navegando...`);
+            } else {
+                appendSystemMessage(`Não encontrei "${query}" no documento.`);
+            }
+        }
+
+        // --- Gemini AI Integration ---
+        function appendMessage(sender, htmlContent, isMarkdown = false) {
+            const chatHistory = document.getElementById('chat-history');
+            const div = document.createElement('div');
+            div.className = `chat-message ${sender} p-3 rounded-lg text-sm shadow-sm ${sender === 'user' ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[90%]'}`;
+            
+            if (isMarkdown) {
+                div.innerHTML = marked.parse(htmlContent);
+            } else {
+                div.innerHTML = htmlContent;
+            }
+            
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        function appendSystemMessage(text) {
+            appendMessage('ai', `<i>${text}</i>`);
+        }
+
+        function sendQuickAction(actionText) {
+            document.getElementById('chat-input').value = actionText;
+            sendMessage();
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            if (!state.googleAccessToken) {
+                alert("Você precisa se conectar com o Google primeiro.");
+                return;
+            }
+
+            input.value = '';
+            appendMessage('user', message);
+            document.getElementById('send-btn').disabled = true;
+
+            // Prepare Context
+            let contextText = "Nenhum documento carregado.";
+            let currentPageNum = 1;
+            if (state.fileType === 'epub' && state.epubRendition) {
+                // For EPUB, extracting text requires rendering logic or epubcfi resolving, keeping it simple for demo
+                contextText = "O usuário está lendo um livro EPUB. Extração de texto exato limitada na demo.";
+            } else if (state.pages.length > 0) {
+                if (state.viewMode === 'paged') {
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = state.pages[state.currentPage];
+                    contextText = tempDiv.textContent;
+                    currentPageNum = state.currentPage + 1;
+                } else {
+                    contextText = "O usuário está visualizando todo o documento de uma vez.";
+                }
+            }
+
+            const promptText = `
+Você é um Tutor Pedagógico integrado a um leitor de e-books (Lumina Reader AI).
+Abaixo está o texto da página/seção atual que o usuário está lendo (Página ${currentPageNum}):
+---
+${contextText.substring(0, 5000)} // Limite para economizar tokens
+---
+
+Pergunta do usuário: ${message}
+
+Responda de forma didática, encorajadora e formatada em Markdown. 
+Se for muito relevante e você identificar a resposta em uma página específica do contexto, 
+você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (Página X)]\` onde X é o número da página (neste caso, a página atual é ${currentPageNum}). O front-end interceptará esse comando para criar um botão navegável.
+            `;
+
+            // Call Gemini API using OAuth Bearer Token or API Key
+            try {
+                let url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+                let headers = {
+                    'Content-Type': 'application/json'
+                };
+
+                if (state.apiKey) {
+                    url += `?key=${state.apiKey}`;
+                } else if (state.googleAccessToken) {
+                    headers['Authorization'] = `Bearer ${state.googleAccessToken}`;
+                } else {
+                    throw new Error("Nenhuma credencial de autenticação encontrada.");
+                }
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{text: promptText}]
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error?.message || "Erro na API Gemini");
+                }
+
+                const data = await response.json();
+                let aiResponse = data.candidates[0].content.parts[0].text;
+
+                // Parse smart navigation commands
+                const navRegex = /\[Ver no livro \(Página (\d+)\)\]/g;
+                let match;
+                while ((match = navRegex.exec(aiResponse)) !== null) {
+                    const pageTarget = parseInt(match[1]) - 1; // 0-indexed internally
+                    const buttonHtml = `<br><button onclick="jumpToPage(${pageTarget})" class="mt-2 text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded hover:bg-indigo-200 transition-colors"><i class="fa-solid fa-location-arrow mr-1"></i> Ir para a Página ${match[1]}</button>`;
+                    aiResponse = aiResponse.replace(match[0], buttonHtml);
+                }
+
+                appendMessage('ai', aiResponse, true);
+
+            } catch (error) {
+                console.error(error);
+                appendMessage('ai', `<span class="text-red-500">Erro ao comunicar com a IA: ${error.message}</span>`);
+            } finally {
+                document.getElementById('send-btn').disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
