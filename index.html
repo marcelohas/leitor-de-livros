@@ -230,7 +230,7 @@
                             <i class="fa-solid fa-upload mr-1"></i> Arquivo
                             <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls,.html,.htm">
                         </label>
-                        <button onclick="loadFromUrlPrompt()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors flex items-center" title="Abrir livro por link" aria-label="Abrir livro por link">
+                        <button onclick="loadFromUrlPrompt()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors flex items-center" title="Abrir livro, página ou vídeo do YouTube por link" aria-label="Abrir conteúdo por link">
                             <i class="fa-solid fa-link"></i>
                         </button>
                     </div>
@@ -1280,6 +1280,158 @@ ${source.slice(0, 50000)}
             return text;
         }
 
+        function getYouTubeVideoId(resource) {
+            try {
+                const parsed = new URL(resource);
+                const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+                if (host === 'youtu.be') return parsed.pathname.split('/').filter(Boolean)[0] || '';
+                if (!['youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)) return '';
+                if (parsed.pathname === '/watch') return parsed.searchParams.get('v') || '';
+                const pathMatch = parsed.pathname.match(/^\/(?:shorts|embed|live)\/([^/?]+)/);
+                return pathMatch?.[1] || '';
+            } catch {
+                return '';
+            }
+        }
+
+        function normalizeYouTubeUrl(resource) {
+            const videoId = getYouTubeVideoId(resource);
+            return videoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}` : '';
+        }
+
+        function getGeminiVideoCredentials() {
+            const credentials = [];
+            if (state.googleAccessToken && !state.apiKey) {
+                credentials.push({
+                    label: 'conta Google',
+                    headers: { 'Authorization': `Bearer ${state.googleAccessToken}` },
+                    apiKey: ''
+                });
+            }
+            if (state.apiKey) {
+                credentials.push({ label: 'chave principal', headers: {}, apiKey: state.apiKey });
+            }
+            const secondaryKey = localStorage.getItem('lumina-fallback-key-gemini') ||
+                (localStorage.getItem('lumina-fallback-provider') === 'gemini'
+                    ? localStorage.getItem('lumina-fallback-key')
+                    : '');
+            if (secondaryKey && secondaryKey !== state.apiKey) {
+                credentials.push({ label: 'Google AI Studio secundário', headers: {}, apiKey: secondaryKey });
+            }
+            return credentials;
+        }
+
+        async function callGeminiYouTubeAPI(youtubeUrl, promptText) {
+            const credentials = getGeminiVideoCredentials();
+            if (credentials.length === 0) {
+                throw new Error('Conecte sua conta Google ou cadastre uma chave do Google AI Studio na engrenagem ⚙️.');
+            }
+
+            const failures = [];
+            for (const credential of credentials) {
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...credential.headers
+                };
+                let apiUrl = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+                if (credential.apiKey) apiUrl += `?key=${encodeURIComponent(credential.apiKey)}`;
+                const payload = {
+                    contents: [{
+                        role: 'user',
+                        parts: [
+                            { file_data: { file_uri: youtubeUrl } },
+                            { text: promptText }
+                        ]
+                    }]
+                };
+
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data.error?.message || `HTTP ${response.status}`);
+                    }
+                    const text = data.candidates?.[0]?.content?.parts
+                        ?.map(part => part.text || '')
+                        .join('')
+                        .trim();
+                    if (!text) {
+                        const blockReason = data.promptFeedback?.blockReason;
+                        throw new Error(blockReason
+                            ? `Resposta bloqueada (${blockReason})`
+                            : 'A API não retornou texto para este vídeo');
+                    }
+                    return text;
+                } catch (error) {
+                    failures.push(`${credential.label}: ${error.message}`);
+                }
+            }
+            throw new Error(`Não foi possível processar o vídeo. ${failures.join(' | ')}`);
+        }
+
+        async function loadYouTubeAsBook(resource) {
+            const youtubeUrl = normalizeYouTubeUrl(resource);
+            const videoId = getYouTubeVideoId(resource);
+            if (!youtubeUrl || !videoId) throw new Error('Link do YouTube inválido.');
+
+            const textLayer = document.getElementById('text-layer');
+            textLayer.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fa-brands fa-youtube text-4xl mb-4 text-red-600 animate-pulse"></i><br>Assistindo ao vídeo e transformando o conteúdo em livro...<br><span class="text-xs text-gray-400 mt-2 block">Vídeos longos podem levar alguns minutos.</span></div>';
+
+            const prompt = `Transforme este vídeo público do YouTube em um livro didático completo e fiel, escrito no mesmo idioma predominante do vídeo.
+
+OBJETIVO
+- Reconstruir as ideias explicadas no áudio e também informações visuais relevantes exibidas na tela.
+- Organizar o material para leitura e estudo posterior no Lumina Reader.
+- Não inventar fatos, exemplos, citações ou conclusões ausentes do vídeo.
+
+FORMATO OBRIGATÓRIO
+# Título claro do livro
+
+## Sobre este vídeo
+Inclua tema, objetivo, idioma e uma explicação breve sobre o conteúdo.
+
+## Sumário
+Liste os capítulos com seus timestamps iniciais no formato [MM:SS].
+
+## Capítulo 1: título
+[MM:SS]
+Desenvolva detalhadamente as explicações, argumentos, exemplos e demonstrações deste trecho em prosa fluida. Use subtítulos quando necessário.
+
+Continue com capítulos suficientes para cobrir o vídeo inteiro em ordem cronológica.
+
+## Síntese final
+Recapitule conceitos, relações e conclusões essenciais.
+
+## Glossário
+Defina os termos técnicos ou nomes fundamentais.
+
+REGRAS EDITORIAIS
+- Produza um texto substancial, não apenas um resumo.
+- Remova repetições, hesitações e vícios de fala sem apagar conteúdo relevante.
+- Converta a oralidade em prosa clara e coesa.
+- Preserve exemplos, etapas, ressalvas e relações de causa e efeito.
+- Inclua timestamps nas mudanças importantes de assunto.
+- Não mencione estas instruções e não use cercas de código Markdown.`;
+
+            const bookText = await callGeminiYouTubeAPI(youtubeUrl, prompt);
+            const titleMatch = bookText.match(/^#\s+(.+)$/m);
+            const safeTitle = (titleMatch?.[1] || `YouTube_${videoId}`)
+                .replace(/[^\p{L}\p{N}_-]+/gu, '_')
+                .replace(/^_+|_+$/g, '')
+                .slice(0, 90) || `YouTube_${videoId}`;
+            const bookFile = new File(
+                [bookText],
+                `${safeTitle}.txt`,
+                { type: 'text/plain;charset=utf-8' }
+            );
+            await handleFileSelection(bookFile);
+            appendSystemMessage(`Vídeo do YouTube transformado no livro "${titleMatch?.[1] || safeTitle}". Agora você pode conversar com o Tutor e criar uma apresentação MIRA.`);
+        }
+
         function showUrlImportFallback(url, resourceType = 'file') {
             const textLayer = document.getElementById('text-layer');
             textLayer.innerHTML = '';
@@ -1367,8 +1519,64 @@ ${source.slice(0, 50000)}
             textLayer.appendChild(panel);
         }
 
+        function showYouTubeImportFallback(url, error) {
+            const textLayer = document.getElementById('text-layer');
+            textLayer.innerHTML = '';
+            const panel = document.createElement('div');
+            panel.className = 'max-w-xl mx-auto my-10 rounded-2xl border border-red-200 bg-red-50 p-6 text-gray-700 shadow-sm';
+
+            const title = document.createElement('h2');
+            title.className = 'text-xl font-bold text-gray-900 mb-3';
+            title.textContent = 'Não foi possível transformar este vídeo automaticamente';
+
+            const explanation = document.createElement('p');
+            explanation.className = 'mb-3 leading-relaxed';
+            explanation.textContent = error?.message || 'O vídeo pode ser privado, não listado, restrito por região ou a cota do Gemini pode ter terminado.';
+
+            const help = document.createElement('p');
+            help.className = 'mb-5 text-sm text-gray-600';
+            help.textContent = 'Como alternativa, abra a transcrição no YouTube, copie o texto completo e cole abaixo.';
+
+            const openLink = document.createElement('a');
+            openLink.href = url;
+            openLink.target = '_blank';
+            openLink.rel = 'noopener noreferrer';
+            openLink.className = 'inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 mb-4';
+            openLink.innerHTML = '<i class="fa-brands fa-youtube"></i> Abrir vídeo no YouTube';
+
+            const textarea = document.createElement('textarea');
+            textarea.rows = 9;
+            textarea.placeholder = 'Cole aqui a transcrição exibida pelo YouTube...';
+            textarea.className = 'w-full rounded-xl border border-red-200 bg-white p-3 text-sm leading-relaxed focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-100';
+
+            const importButton = document.createElement('button');
+            importButton.type = 'button';
+            importButton.className = 'mt-3 inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500';
+            importButton.innerHTML = '<i class="fa-solid fa-book-open"></i> Transformar transcrição em livro';
+            importButton.addEventListener('click', async () => {
+                const transcript = textarea.value.trim();
+                if (transcript.length < 100) {
+                    textarea.setCustomValidity('Cole uma transcrição maior antes de continuar.');
+                    textarea.reportValidity();
+                    return;
+                }
+                textarea.setCustomValidity('');
+                const videoId = getYouTubeVideoId(url) || 'video';
+                const transcriptFile = new File(
+                    [transcript],
+                    `YouTube_${videoId}_transcricao.txt`,
+                    { type: 'text/plain;charset=utf-8' }
+                );
+                await handleFileSelection(transcriptFile);
+                appendSystemMessage('Transcrição do YouTube carregada como livro. O Tutor e o MIRA já estão disponíveis.');
+            });
+
+            panel.append(title, explanation, help, openLink, textarea, importButton);
+            textLayer.appendChild(panel);
+        }
+
         async function loadFromUrlPrompt() {
-            const url = prompt("Cole o link direto para o livro (PDF, EPUB, TXT, DOCX):");
+            const url = prompt("Cole o link do livro, página ou vídeo público do YouTube:");
             if (!url) return;
 
             let parsedUrl;
@@ -1386,6 +1594,11 @@ ${source.slice(0, 50000)}
             document.getElementById('text-layer').style.display = 'block';
             
             try {
+                if (getYouTubeVideoId(url)) {
+                    await loadYouTubeAsBook(url);
+                    return;
+                }
+
                 const normalizedResource = normalizeSharedBookUrl(url);
                 const supportedExtensions = ['pdf', 'epub', 'docx', 'doc', 'txt', 'xlsx', 'xls', 'html', 'htm'];
                 const pathExtension = parsedUrl.pathname.split('.').pop().toLowerCase();
@@ -1475,6 +1688,10 @@ ${source.slice(0, 50000)}
                 
             } catch (error) {
                 console.error(error);
+                if (getYouTubeVideoId(parsedUrl.href)) {
+                    showYouTubeImportFallback(parsedUrl.href, error);
+                    return;
+                }
                 const pathExtension = parsedUrl.pathname.split('.').pop().toLowerCase();
                 const downloadableExtensions = ['pdf', 'epub', 'docx', 'doc', 'txt', 'xlsx', 'xls'];
                 showUrlImportFallback(parsedUrl.href, downloadableExtensions.includes(pathExtension) ? 'file' : 'web');
