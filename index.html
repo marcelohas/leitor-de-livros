@@ -1401,7 +1401,7 @@ ${source.slice(0, 50000)}
         }
 
         async function callGeminiAPI(promptText, useJsonFormat = false) {
-            const fallbackModels = [CONFIG.GEMINI_MODEL, 'gemini-1.5-flash-8b', 'gemini-1.5-pro'];
+            const fallbackModels = [CONFIG.GEMINI_MODEL, 'gemini-1.5-flash-8b'];
             let headers = { 'Content-Type': 'application/json' };
 
             if (state.googleAccessToken && !state.apiKey) {
