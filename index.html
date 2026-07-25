@@ -478,7 +478,7 @@
             // Seu Client ID do Google Cloud para OAuth2 nativo
             GOOGLE_CLIENT_ID: '125726121952-2auhrjc0430gb5l2oulg8sfs3pt3enl2.apps.googleusercontent.com', 
             GEMINI_API_VERSION: 'v1beta',
-            GEMINI_MODEL: 'gemini-1.5-flash'
+            GEMINI_MODEL: 'gemini-2.5-flash'
         };
 
         // --- Initialization & Auth ---
@@ -1537,7 +1537,7 @@ ${source.slice(0, 50000)}
             // If we reach here, the Google API failed.
             // Check for Fallback Provider
             const fallbackKey = localStorage.getItem('lumina-fallback-key');
-            const fallbackProvider = localStorage.getItem('lumina-fallback-provider') || 'groq';
+            const fallbackProvider = localStorage.getItem('lumina-fallback-provider') || 'gemini';
             
             if (lastError) {
                 if (fallbackKey) {
@@ -1546,14 +1546,43 @@ ${source.slice(0, 50000)}
                     appendSystemMessage(`${reasonMsg}! Acionando IA de emergência (${fallbackProvider.toUpperCase()})...`);
                     return await callFallbackAPI(promptText, fallbackProvider, fallbackKey, useJsonFormat);
                 } else if (lastError.code === 'GEMINI_QUOTA_EXCEEDED') {
-                    throw new Error("A sua cota gratuita do Google acabou! Dica: Clique na engrenagem ⚙️ (no menu superior) para cadastrar uma chave secundária (Groq ou OpenRouter) para continuar lendo.");
+                    throw new Error("A sua cota gratuita do Google acabou! Dica: Clique na engrenagem ⚙️ (no menu superior) para cadastrar uma chave secundária do Google AI Studio, Groq ou OpenRouter.");
                 } else {
                     // It's some other Google error (like Not Found) and they don't have Groq configured.
-                    throw new Error(`Erro do Google: ${lastError.message} (Dica: Você pode ignorar os erros do Google configurando uma chave da Groq na engrenagem ⚙️ no menu superior)`);
+                    throw new Error(`Erro do Google: ${lastError.message} (Dica: Configure uma IA secundária na engrenagem ⚙️ no menu superior.)`);
                 }
             }
 
             throw lastError;
+        }
+
+        function compactPromptForProvider(promptText, provider) {
+            const limits = {
+                groq: 16000,
+                openrouter: 24000
+            };
+            const maxChars = limits[provider];
+            if (!maxChars || promptText.length <= maxChars) return promptText;
+
+            // Mantém as instruções iniciais e o final, onde ficam a pergunta e
+            // os requisitos de resposta. Isso reduz tokens sem perder a intenção.
+            const endingChars = Math.min(5000, Math.floor(maxChars * 0.35));
+            const beginningChars = maxChars - endingChars;
+            return `${promptText.slice(0, beginningChars)}
+
+[... parte intermediária do documento omitida para respeitar o limite de tokens da ${provider.toUpperCase()} ...]
+
+${promptText.slice(-endingChars)}`;
+        }
+
+        function extractFallbackText(data, provider) {
+            if (provider === 'gemini') {
+                return data.candidates?.[0]?.content?.parts
+                    ?.map(part => part.text || '')
+                    .join('')
+                    .trim() || '';
+            }
+            return data.choices?.[0]?.message?.content?.trim() || '';
         }
 
         async function callFallbackAPI(promptText, provider, apiKey, useJsonFormat) {
@@ -1562,17 +1591,18 @@ ${source.slice(0, 50000)}
             let headers = {
                 'Content-Type': 'application/json'
             };
+            const safePromptText = compactPromptForProvider(promptText, provider);
 
             if (provider === 'gemini') {
-                url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-                payload = { contents: [{ parts: [{text: promptText}] }] };
+                url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
+                payload = { contents: [{ parts: [{text: safePromptText}] }] };
                 if (useJsonFormat) payload.generationConfig = { responseMimeType: "application/json" };
             } else if (provider === 'groq') {
                 url = 'https://api.groq.com/openai/v1/chat/completions';
                 headers['Authorization'] = `Bearer ${apiKey}`;
                 payload = {
                     model: 'llama-3.1-8b-instant',
-                    messages: [{ role: 'user', content: promptText }]
+                    messages: [{ role: 'user', content: safePromptText }]
                 };
                 if (useJsonFormat) payload.response_format = { type: 'json_object' };
             } else if (provider === 'openrouter') {
@@ -1582,8 +1612,10 @@ ${source.slice(0, 50000)}
                 headers['X-Title'] = 'Lumina Reader';
                 payload = {
                     model: 'meta-llama/llama-3.1-8b-instruct:free',
-                    messages: [{ role: 'user', content: promptText }]
+                    messages: [{ role: 'user', content: safePromptText }]
                 };
+            } else {
+                throw new Error(`Provedor de fallback desconhecido: ${provider}`);
             }
 
             const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
@@ -1591,17 +1623,26 @@ ${source.slice(0, 50000)}
 
             if (!response.ok) {
                 const errMsg = data.error?.message || `Erro na API ${provider}`;
-                if (errMsg.toLowerCase().includes('too large') || errMsg.toLowerCase().includes('tokens per minute')) {
-                    throw new Error(`Texto gigante demais! A cota gratuita da ${provider.toUpperCase()} (limite de tokens) estourou com este tamanho de texto. Dica: Altere o Provedor para "Google Gemini" na engrenagem ⚙️ e cole uma chave do Google AI Studio para ler textos gigantes.`);
+                const normalizedError = errMsg.toLowerCase();
+                if (normalizedError.includes('too large') ||
+                    normalizedError.includes('tokens per minute') ||
+                    normalizedError.includes('context_length_exceeded')) {
+                    const suggestion = provider === 'gemini'
+                        ? 'Tente novamente com uma seção menor do documento.'
+                        : 'Tente novamente na página atual ou configure uma chave do Google AI Studio.';
+                    throw new Error(`O limite de contexto ou tokens da ${provider.toUpperCase()} foi atingido. ${suggestion}`);
                 }
                 throw new Error(errMsg);
             }
 
-            if (provider === 'gemini') {
-                return data.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || "";
-            } else {
-                return data.choices?.[0]?.message?.content || "";
+            const responseText = extractFallbackText(data, provider);
+            if (!responseText) {
+                const blockReason = data.promptFeedback?.blockReason;
+                throw new Error(blockReason
+                    ? `A resposta da ${provider.toUpperCase()} foi bloqueada (${blockReason}).`
+                    : `A ${provider.toUpperCase()} retornou uma resposta vazia.`);
             }
+            return responseText;
         }
 
         // --- AI Web Crawler ---
