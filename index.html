@@ -1531,17 +1531,22 @@ ${source.slice(0, 50000)}
                     return aiResponseParts.map(part => part.text || '').join('');
                 }
             
-            // If we reach here, the Google quota failed (or all models failed).
+            // If we reach here, the Google API failed.
             // Check for Fallback Provider
             const fallbackKey = localStorage.getItem('lumina-fallback-key');
             const fallbackProvider = localStorage.getItem('lumina-fallback-provider') || 'groq';
             
-            if (lastError && lastError.code === 'GEMINI_QUOTA_EXCEEDED') {
+            if (lastError) {
                 if (fallbackKey) {
-                    appendSystemMessage(`Cota do Google esgotada! Acionando IA de emergência (${fallbackProvider.toUpperCase()})...`);
+                    const isQuota = lastError.code === 'GEMINI_QUOTA_EXCEEDED';
+                    const reasonMsg = isQuota ? "Cota do Google esgotada" : "Falha na API do Google";
+                    appendSystemMessage(`${reasonMsg}! Acionando IA de emergência (${fallbackProvider.toUpperCase()})...`);
                     return await callFallbackAPI(promptText, fallbackProvider, fallbackKey, useJsonFormat);
-                } else {
+                } else if (lastError.code === 'GEMINI_QUOTA_EXCEEDED') {
                     throw new Error("A sua cota gratuita do Google acabou! Dica: Clique na engrenagem ⚙️ (no menu superior) para cadastrar uma chave secundária (Groq ou OpenRouter) para continuar lendo.");
+                } else {
+                    // It's some other Google error (like Not Found) and they don't have Groq configured.
+                    throw new Error(`Erro do Google: ${lastError.message} (Dica: Você pode ignorar os erros do Google configurando uma chave da Groq na engrenagem ⚙️ no menu superior)`);
                 }
             }
 
