@@ -293,19 +293,25 @@
                         <button id="ai-settings-btn" onclick="toggleAISettingsMenu(event)" class="w-8 h-8 rounded hover:bg-gray-200 flex items-center justify-center text-gray-600" title="Configurações de IA (Fallback)" aria-label="Abrir configurações de IA" aria-expanded="false">
                             <i class="fa-solid fa-microchip"></i>
                         </button>
-                        <div id="ai-settings-menu" class="absolute right-0 mt-1 w-72 bg-white rounded-lg shadow-xl border border-gray-100 p-4 hidden z-50">
-                            <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">IA Secundária (Fallback)</h4>
-                            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Será usada automaticamente <b>apenas</b> quando a cota da sua conta do Google esgotar.</p>
+                        <div id="ai-settings-menu" class="absolute right-0 mt-1 w-80 bg-white rounded-lg shadow-xl border border-gray-100 p-4 hidden z-50">
+                            <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Rotação de IA</h4>
+                            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Quando a IA principal falhar, os provedores configurados serão tentados automaticamente em sequência.</p>
                             
-                            <label class="block text-xs font-semibold text-gray-700 mb-1">Provedor:</label>
-                            <select id="fallback-provider" class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500" onchange="updateFallbackPlaceholder()">
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Primeiro fallback:</label>
+                            <select id="fallback-provider" class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500">
                                 <option value="gemini">Google Gemini (AI Studio)</option>
                                 <option value="groq">Groq (Llama 3)</option>
                                 <option value="openrouter">OpenRouter (Múltiplos)</option>
                             </select>
 
-                            <label class="block text-xs font-semibold text-gray-700 mb-1">API Key:</label>
-                            <input type="password" id="fallback-api-key" placeholder="AIza..." class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500">
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Google AI Studio:</label>
+                            <input type="password" id="fallback-key-gemini" placeholder="AIzaSy..." class="w-full text-sm border rounded p-1.5 mb-2 outline-none focus:border-indigo-500">
+
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Groq:</label>
+                            <input type="password" id="fallback-key-groq" placeholder="gsk_..." class="w-full text-sm border rounded p-1.5 mb-2 outline-none focus:border-indigo-500">
+
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">OpenRouter:</label>
+                            <input type="password" id="fallback-key-openrouter" placeholder="sk-or-v1-..." class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500">
                             
                             <button onclick="saveFallbackSettings()" class="w-full bg-indigo-600 text-white rounded py-1.5 text-sm hover:bg-indigo-700 transition-colors">Salvar</button>
                         </div>
@@ -713,27 +719,29 @@
             button.setAttribute('aria-expanded', String(willOpen));
             
             if (willOpen) {
-                document.getElementById('fallback-provider').value = localStorage.getItem('lumina-fallback-provider') || 'gemini';
-                document.getElementById('fallback-api-key').value = localStorage.getItem('lumina-fallback-key') || '';
-                updateFallbackPlaceholder();
+                const legacyProvider = localStorage.getItem('lumina-fallback-provider') || 'gemini';
+                const legacyKey = localStorage.getItem('lumina-fallback-key') || '';
+                document.getElementById('fallback-provider').value = legacyProvider;
+                ['gemini', 'groq', 'openrouter'].forEach(provider => {
+                    const savedKey = localStorage.getItem(`lumina-fallback-key-${provider}`);
+                    document.getElementById(`fallback-key-${provider}`).value =
+                        savedKey ?? (provider === legacyProvider ? legacyKey : '');
+                });
             }
-        }
-
-        function updateFallbackPlaceholder() {
-            const provider = document.getElementById('fallback-provider').value;
-            const input = document.getElementById('fallback-api-key');
-            if (provider === 'gemini') input.placeholder = 'AIzaSy...';
-            else if (provider === 'groq') input.placeholder = 'gsk_...';
-            else input.placeholder = 'sk-or-v1-...';
         }
 
         function saveFallbackSettings() {
             const provider = document.getElementById('fallback-provider').value;
-            const key = document.getElementById('fallback-api-key').value.trim();
             localStorage.setItem('lumina-fallback-provider', provider);
-            localStorage.setItem('lumina-fallback-key', key);
+            ['gemini', 'groq', 'openrouter'].forEach(providerName => {
+                const key = document.getElementById(`fallback-key-${providerName}`).value.trim();
+                if (key) localStorage.setItem(`lumina-fallback-key-${providerName}`, key);
+                else localStorage.removeItem(`lumina-fallback-key-${providerName}`);
+            });
+            localStorage.removeItem('lumina-fallback-key');
             document.getElementById('ai-settings-menu').classList.add('hidden');
-            alert("Configurações de IA de emergência salvas!");
+            document.getElementById('ai-settings-btn').setAttribute('aria-expanded', 'false');
+            alert("Rotação automática de IA salva!");
         }
 
         function closeAISettingsMenu() {
@@ -1534,26 +1542,57 @@ ${source.slice(0, 50000)}
                     return aiResponseParts.map(part => part.text || '').join('');
                 }
             
-            // If we reach here, the Google API failed.
-            // Check for Fallback Provider
-            const fallbackKey = localStorage.getItem('lumina-fallback-key');
-            const fallbackProvider = localStorage.getItem('lumina-fallback-provider') || 'gemini';
-            
             if (lastError) {
-                if (fallbackKey) {
-                    const isQuota = lastError.code === 'GEMINI_QUOTA_EXCEEDED';
-                    const reasonMsg = isQuota ? "Cota do Google esgotada" : "Falha na API do Google";
-                    appendSystemMessage(`${reasonMsg}! Acionando IA de emergência (${fallbackProvider.toUpperCase()})...`);
-                    return await callFallbackAPI(promptText, fallbackProvider, fallbackKey, useJsonFormat);
-                } else if (lastError.code === 'GEMINI_QUOTA_EXCEEDED') {
-                    throw new Error("A sua cota gratuita do Google acabou! Dica: Clique na engrenagem ⚙️ (no menu superior) para cadastrar uma chave secundária do Google AI Studio, Groq ou OpenRouter.");
-                } else {
-                    // It's some other Google error (like Not Found) and they don't have Groq configured.
-                    throw new Error(`Erro do Google: ${lastError.message} (Dica: Configure uma IA secundária na engrenagem ⚙️ no menu superior.)`);
-                }
+                return await callFallbackRotation(promptText, useJsonFormat, lastError);
             }
 
             throw lastError;
+        }
+
+        function getFallbackCandidates() {
+            const providers = ['gemini', 'groq', 'openrouter'];
+            const preferredProvider = localStorage.getItem('lumina-fallback-provider') || 'gemini';
+            const legacyKey = localStorage.getItem('lumina-fallback-key') || '';
+            const orderedProviders = [
+                preferredProvider,
+                ...providers.filter(provider => provider !== preferredProvider)
+            ];
+
+            return orderedProviders.map(provider => ({
+                provider,
+                key: localStorage.getItem(`lumina-fallback-key-${provider}`) ||
+                    (provider === preferredProvider ? legacyKey : '')
+            })).filter(candidate => candidate.key);
+        }
+
+        async function callFallbackRotation(promptText, useJsonFormat, primaryError) {
+            const candidates = getFallbackCandidates();
+            if (candidates.length === 0) {
+                const quotaMessage = primaryError.code === 'GEMINI_QUOTA_EXCEEDED'
+                    ? 'A sua cota gratuita do Google acabou.'
+                    : `Erro do Google: ${primaryError.message}`;
+                throw new Error(`${quotaMessage} Configure uma ou mais IAs de fallback na engrenagem ⚙️.`);
+            }
+
+            const failures = [];
+            for (let index = 0; index < candidates.length; index++) {
+                const { provider, key } = candidates[index];
+                const providerLabel = provider.toUpperCase();
+                appendSystemMessage(
+                    `${index === 0 ? 'Acionando' : 'Tentando o próximo provedor:'} ${providerLabel}...`
+                );
+                try {
+                    return await callFallbackAPI(promptText, provider, key, useJsonFormat);
+                } catch (error) {
+                    console.warn(`Fallback ${provider} falhou.`, error);
+                    failures.push(`${providerLabel}: ${error.message}`);
+                    if (index < candidates.length - 1) {
+                        appendSystemMessage(`${providerLabel} falhou. Continuando a rotação automática...`);
+                    }
+                }
+            }
+
+            throw new Error(`Todos os provedores configurados falharam. ${failures.join(' | ')}`);
         }
 
         function compactPromptForProvider(promptText, provider) {
