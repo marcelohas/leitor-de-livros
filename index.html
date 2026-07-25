@@ -1401,12 +1401,14 @@ ${source.slice(0, 50000)}
         }
 
         async function callGeminiAPI(promptText, useJsonFormat = false) {
-            let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+            const fallbackModels = [CONFIG.GEMINI_MODEL, 'gemini-1.5-flash-8b', 'gemini-2.0-flash-exp'];
             let headers = { 'Content-Type': 'application/json' };
 
-            if (state.apiKey) url += `?key=${state.apiKey}`;
-            else if (state.googleAccessToken) headers['Authorization'] = `Bearer ${state.googleAccessToken}`;
-            else throw new Error("Nenhuma credencial de autenticação encontrada para a IA.");
+            if (state.googleAccessToken && !state.apiKey) {
+                headers['Authorization'] = `Bearer ${state.googleAccessToken}`;
+            } else if (!state.apiKey && !state.googleAccessToken) {
+                throw new Error("Nenhuma credencial de autenticação encontrada para a IA.");
+            }
             
             const payload = {
                 contents: [{ parts: [{text: promptText}] }]
@@ -1416,40 +1418,68 @@ ${source.slice(0, 50000)}
                 payload.generationConfig = { responseMimeType: "application/json" };
             }
 
-            const requestOptions = { method: 'POST', headers: headers, body: JSON.stringify(payload) };
-
             let data;
-            const maxAttempts = 3;
-            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                const response = await fetch(url, requestOptions);
-                data = await response.json().catch(() => ({}));
-                if (response.ok) break;
+            let lastError;
+            
+            for (let i = 0; i < fallbackModels.length; i++) {
+                const currentModel = fallbackModels[i];
+                let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${currentModel}:generateContent`;
+                if (state.apiKey) url += `?key=${state.apiKey}`;
 
-                const apiMessage = data.error?.message || "Erro na API Gemini";
-                if (response.status === 429 && isGeminiQuotaMessage(apiMessage)) {
-                    const quotaError = new Error(apiMessage);
-                    quotaError.code = 'GEMINI_QUOTA_EXCEEDED';
-                    quotaError.retryAfterSeconds = getGeminiRetryDelaySeconds(apiMessage, data, response);
-                    throw quotaError;
-                }
-                const isHighDemand = apiMessage.toLowerCase().includes("high demand") || apiMessage.toLowerCase().includes("overloaded");
-                const isTemporaryError = response.status === 429 || response.status >= 500 || isHighDemand;
+                const requestOptions = { method: 'POST', headers: headers, body: JSON.stringify(payload) };
+
+                const maxAttempts = 2; // For transient errors on the SAME model
+                let modelSuccess = false;
                 
-                if (!isTemporaryError || attempt === maxAttempts) {
-                    throw new Error(apiMessage);
+                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                    const response = await fetch(url, requestOptions);
+                    data = await response.json().catch(() => ({}));
+                    if (response.ok) {
+                        modelSuccess = true;
+                        break; // Success! Break attempt loop
+                    }
+
+                    const apiMessage = data.error?.message || "Erro na API Gemini";
+                    lastError = new Error(apiMessage);
+                    
+                    if (response.status === 429 && isGeminiQuotaMessage(apiMessage)) {
+                        // Quota exceeded for THIS model. Don't retry, move to next model.
+                        lastError.code = 'GEMINI_QUOTA_EXCEEDED';
+                        lastError.retryAfterSeconds = getGeminiRetryDelaySeconds(apiMessage, data, response);
+                        if (i < fallbackModels.length - 1) {
+                            appendSystemMessage(`Cota esgotada no modelo ${currentModel}. Alternando para o modelo gratuito alternativo...`);
+                        }
+                        break;
+                    }
+                    
+                    const isHighDemand = apiMessage.toLowerCase().includes("high demand") || apiMessage.toLowerCase().includes("overloaded");
+                    const isTemporaryError = response.status === 429 || response.status >= 500 || isHighDemand;
+                    
+                    if (!isTemporaryError || attempt === maxAttempts) {
+                        break; // Fatal error or max attempts reached
+                    }
+
+                    const retryAfterSeconds = Number(response.headers.get('Retry-After'));
+                    const delayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 1000 * (2 ** (attempt - 1));
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
                 }
-
-                const retryAfterSeconds = Number(response.headers.get('Retry-After'));
-                const delayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 1000 * (2 ** (attempt - 1));
-                await new Promise(resolve => setTimeout(resolve, delayMs));
+                
+                if (modelSuccess) {
+                    if (currentModel !== CONFIG.GEMINI_MODEL) {
+                        CONFIG.GEMINI_MODEL = currentModel; // Update default to the working one for future calls
+                    }
+                    
+                    const aiResponseParts = data.candidates?.[0]?.content?.parts;
+                    if (!Array.isArray(aiResponseParts) || aiResponseParts.length === 0) {
+                        const blockReason = data.promptFeedback?.blockReason;
+                        throw new Error(blockReason ? `Bloqueado pela API (${blockReason}).` : "A API não retornou texto.");
+                    }
+                    return aiResponseParts.map(part => part.text || '').join('');
+                }
             }
-
-            const aiResponseParts = data.candidates?.[0]?.content?.parts;
-            if (!Array.isArray(aiResponseParts) || aiResponseParts.length === 0) {
-                const blockReason = data.promptFeedback?.blockReason;
-                throw new Error(blockReason ? `Bloqueado pela API (${blockReason}).` : "A API não retornou texto.");
-            }
-            return aiResponseParts.map(part => part.text || '').join('');
+            
+            // If all models fail, throw the last error
+            throw lastError;
         }
 
         // --- AI Web Crawler ---
