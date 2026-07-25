@@ -1464,7 +1464,6 @@ ${source.slice(0, 50000)}
         }
 
         async function callGeminiAPI(promptText, useJsonFormat = false) {
-            const fallbackModels = [CONFIG.GEMINI_MODEL, 'gemini-1.5-flash-8b'];
             let headers = { 'Content-Type': 'application/json' };
 
             if (state.googleAccessToken && !state.apiKey) {
@@ -1484,33 +1483,31 @@ ${source.slice(0, 50000)}
             let data;
             let lastError;
             
-            for (let i = 0; i < fallbackModels.length; i++) {
-                const currentModel = fallbackModels[i];
-                let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${currentModel}:generateContent`;
-                if (state.apiKey) url += `?key=${state.apiKey}`;
+            let url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+            if (state.apiKey) url += `?key=${state.apiKey}`;
 
-                const requestOptions = { method: 'POST', headers: headers, body: JSON.stringify(payload) };
+            const requestOptions = { method: 'POST', headers: headers, body: JSON.stringify(payload) };
 
-                const maxAttempts = 2; // For transient errors on the SAME model
-                let modelSuccess = false;
+            const maxAttempts = 2; // For transient errors
+            let modelSuccess = false;
+            
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                const response = await fetch(url, requestOptions);
+                data = await response.json().catch(() => ({}));
+                if (response.ok) {
+                    modelSuccess = true;
+                    break; // Success! Break attempt loop
+                }
+
+                const apiMessage = data.error?.message || "Erro na API Gemini";
+                lastError = new Error(apiMessage);
                 
-                for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    const response = await fetch(url, requestOptions);
-                    data = await response.json().catch(() => ({}));
-                    if (response.ok) {
-                        modelSuccess = true;
-                        break; // Success! Break attempt loop
-                    }
-
-                    const apiMessage = data.error?.message || "Erro na API Gemini";
-                    lastError = new Error(apiMessage);
-                    
-                    if (response.status === 429 && isGeminiQuotaMessage(apiMessage)) {
-                        // Quota exceeded for THIS model. Don't retry, move to next model.
-                        lastError.code = 'GEMINI_QUOTA_EXCEEDED';
-                        lastError.retryAfterSeconds = getGeminiRetryDelaySeconds(apiMessage, data, response);
-                        break;
-                    }
+                if (response.status === 429 && isGeminiQuotaMessage(apiMessage)) {
+                    // Quota exceeded. Don't retry.
+                    lastError.code = 'GEMINI_QUOTA_EXCEEDED';
+                    lastError.retryAfterSeconds = getGeminiRetryDelaySeconds(apiMessage, data, response);
+                    break;
+                }
                     
                     const isHighDemand = apiMessage.toLowerCase().includes("high demand") || apiMessage.toLowerCase().includes("overloaded");
                     const isTemporaryError = response.status === 429 || response.status >= 500 || isHighDemand;
@@ -1524,11 +1521,8 @@ ${source.slice(0, 50000)}
                     await new Promise(resolve => setTimeout(resolve, delayMs));
                 }
                 
+                
                 if (modelSuccess) {
-                    if (currentModel !== CONFIG.GEMINI_MODEL) {
-                        CONFIG.GEMINI_MODEL = currentModel; // Update default to the working one for future calls
-                    }
-                    
                     const aiResponseParts = data.candidates?.[0]?.content?.parts;
                     if (!Array.isArray(aiResponseParts) || aiResponseParts.length === 0) {
                         const blockReason = data.promptFeedback?.blockReason;
@@ -1536,7 +1530,6 @@ ${source.slice(0, 50000)}
                     }
                     return aiResponseParts.map(part => part.text || '').join('');
                 }
-            }
             
             // If we reach here, the Google quota failed (or all models failed).
             // Check for Fallback Provider
