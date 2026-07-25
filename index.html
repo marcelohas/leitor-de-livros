@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="application-version" content="gemini-quota-2026-07-24.4">
+    <meta name="application-version" content="quota-loop-fix-2026-07-24.5">
     <title>Lumina Reader AI</title>
     
     <!-- Tailwind CSS -->
@@ -440,6 +440,7 @@
             currentEpubCfi: null,
             authenticated: false,
             aiBusy: false,
+            aiQuotaBlocked: false,
             lastUserMessage: '',
             miraSelection: '',
             miraChatText: '',
@@ -557,20 +558,23 @@
         function updateTutorAvailability() {
             const hasCredentials = state.authenticated && Boolean(state.apiKey || state.googleAccessToken);
             const hasDocument = hasLoadedDocument();
-            const enabled = hasCredentials && hasDocument && !state.aiBusy;
+            const enabled = hasCredentials && hasDocument && !state.aiBusy && !state.aiQuotaBlocked;
             const input = document.getElementById('chat-input');
             input.disabled = !enabled;
             input.placeholder = !hasCredentials
                 ? 'Conecte sua conta Google para usar o tutor'
                 : !hasDocument
                     ? 'Abra um documento para ativar o tutor'
-                    : state.aiBusy ? 'O tutor está preparando a resposta...' : 'Faça uma pergunta sobre o livro...';
+                    : state.aiQuotaBlocked
+                        ? 'Limite do Gemini atingido — tente novamente mais tarde'
+                        : state.aiBusy ? 'O tutor está preparando a resposta...' : 'Faça uma pergunta sobre o livro...';
             document.getElementById('send-btn').disabled = !enabled;
             document.querySelectorAll('.quick-action').forEach(button => { button.disabled = !enabled; });
 
             if (state.aiBusy) setAIStatus('IA pensando', 'busy');
             else if (!hasCredentials) setAIStatus('Offline', 'offline');
             else if (!hasDocument) setAIStatus('Conta conectada', 'connected');
+            else if (state.aiQuotaBlocked) setAIStatus('Cota esgotada', 'error');
             else setAIStatus('IA disponível', 'available');
         }
 
@@ -859,7 +863,7 @@
         }
 
         async function buildMiraPlan(source, mode) {
-            const hasAI = Boolean(state.apiKey || state.googleAccessToken);
+            const hasAI = Boolean(state.apiKey || state.googleAccessToken) && !state.aiQuotaBlocked;
             if (!hasAI) return createHeuristicMiraPlan(source);
 
             const prompt = `
@@ -1851,7 +1855,7 @@ ${JSON.stringify(links.slice(0, 150))}`;
             appendMessage('ai', `<i>${escapeHTML(text)}</i>`);
         }
 
-        function appendErrorMessage(text, retryAfterSeconds = 0) {
+        function appendErrorMessage(text, allowRetry = true) {
             const chatHistory = document.getElementById('chat-history');
             const div = document.createElement('div');
             div.className = 'chat-message ai p-3 rounded-lg text-sm shadow-sm mr-auto max-w-[90%]';
@@ -1863,23 +1867,8 @@ ${JSON.stringify(links.slice(0, 150))}`;
             retryButton.className = 'text-xs bg-white text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed';
             retryButton.textContent = 'Tentar novamente';
             retryButton.addEventListener('click', retryLastMessage);
-
-            let remainingSeconds = Math.max(0, Math.ceil(retryAfterSeconds));
-            if (remainingSeconds > 0) {
-                retryButton.disabled = true;
-                retryButton.textContent = `Tentar novamente em ${remainingSeconds}s`;
-                const countdown = setInterval(() => {
-                    remainingSeconds -= 1;
-                    if (remainingSeconds <= 0) {
-                        clearInterval(countdown);
-                        retryButton.disabled = false;
-                        retryButton.textContent = 'Tentar novamente';
-                    } else {
-                        retryButton.textContent = `Tentar novamente em ${remainingSeconds}s`;
-                    }
-                }, 1000);
-            }
-            div.append(message, retryButton);
+            div.appendChild(message);
+            if (allowRetry) div.appendChild(retryButton);
             chatHistory.appendChild(div);
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
@@ -1900,6 +1889,10 @@ ${JSON.stringify(links.slice(0, 150))}`;
             const message = input.value.trim();
             if (!message) return;
 
+            if (state.aiQuotaBlocked) {
+                appendSystemMessage('A cota do Gemini continua esgotada. O leitor permanece disponível; tente usar o Tutor novamente mais tarde.');
+                return;
+            }
             if (!state.googleAccessToken && !state.apiKey) {
                 alert("Você precisa se conectar com o Google primeiro.");
                 return;
@@ -1975,18 +1968,18 @@ você PODE adicionar ao final da sua resposta o comando exato: \`[Ver no livro (
             } catch (error) {
                 console.error(error);
                 let displayMessage = error.message;
-                let retryAfterSeconds = 0;
+                let allowRetry = true;
                 if (error.code === 'GEMINI_QUOTA_EXCEEDED' || isGeminiQuotaMessage(displayMessage)) {
-                    retryAfterSeconds = error.retryAfterSeconds || getGeminiRetryDelaySeconds(displayMessage);
-                    displayMessage = `O limite temporário do plano gratuito do Gemini foi atingido. Aguarde ${retryAfterSeconds} segundos para tentar novamente.`;
-                    setAIStatus('Limite temporário', 'error');
+                    state.aiQuotaBlocked = true;
+                    allowRetry = false;
+                    displayMessage = 'O limite de uso do Gemini foi atingido e o Tutor está temporariamente indisponível. Você pode continuar lendo e usar a geração local do MIRA. Tente usar a IA novamente mais tarde.';
                 } else if (displayMessage.toLowerCase().includes("high demand") || displayMessage.toLowerCase().includes("overloaded")) {
                     displayMessage = "O serviço de Inteligência Artificial está sob alta demanda no momento. Aguarde alguns instantes e tente novamente.";
                     setAIStatus('IA indisponível', 'error');
                 } else {
                     setAIStatus('IA indisponível', 'error');
                 }
-                appendErrorMessage(displayMessage, retryAfterSeconds);
+                appendErrorMessage(displayMessage, allowRetry);
             } finally {
                 state.aiBusy = false;
                 updateTutorAvailability();
