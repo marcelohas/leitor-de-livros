@@ -1564,7 +1564,7 @@ ${source.slice(0, 50000)}
             if (provider === 'groq') {
                 url = 'https://api.groq.com/openai/v1/chat/completions';
                 payload = {
-                    model: 'llama3-8b-8192',
+                    model: 'llama-3.1-8b-instant',
                     messages: [{ role: 'user', content: promptText }]
                 };
                 if (useJsonFormat) payload.response_format = { type: 'json_object' };
@@ -1573,7 +1573,7 @@ ${source.slice(0, 50000)}
                 headers['HTTP-Referer'] = window.location.href;
                 headers['X-Title'] = 'Lumina Reader';
                 payload = {
-                    model: 'meta-llama/llama-3-8b-instruct:free',
+                    model: 'meta-llama/llama-3.1-8b-instruct:free',
                     messages: [{ role: 'user', content: promptText }]
                 };
             }
