@@ -299,12 +299,13 @@
                             
                             <label class="block text-xs font-semibold text-gray-700 mb-1">Provedor:</label>
                             <select id="fallback-provider" class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500" onchange="updateFallbackPlaceholder()">
+                                <option value="gemini">Google Gemini (AI Studio)</option>
                                 <option value="groq">Groq (Llama 3)</option>
                                 <option value="openrouter">OpenRouter (Múltiplos)</option>
                             </select>
 
                             <label class="block text-xs font-semibold text-gray-700 mb-1">API Key:</label>
-                            <input type="password" id="fallback-api-key" placeholder="gsk_..." class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500">
+                            <input type="password" id="fallback-api-key" placeholder="AIza..." class="w-full text-sm border rounded p-1.5 mb-3 outline-none focus:border-indigo-500">
                             
                             <button onclick="saveFallbackSettings()" class="w-full bg-indigo-600 text-white rounded py-1.5 text-sm hover:bg-indigo-700 transition-colors">Salvar</button>
                         </div>
@@ -712,7 +713,7 @@
             button.setAttribute('aria-expanded', String(willOpen));
             
             if (willOpen) {
-                document.getElementById('fallback-provider').value = localStorage.getItem('lumina-fallback-provider') || 'groq';
+                document.getElementById('fallback-provider').value = localStorage.getItem('lumina-fallback-provider') || 'gemini';
                 document.getElementById('fallback-api-key').value = localStorage.getItem('lumina-fallback-key') || '';
                 updateFallbackPlaceholder();
             }
@@ -721,7 +722,9 @@
         function updateFallbackPlaceholder() {
             const provider = document.getElementById('fallback-provider').value;
             const input = document.getElementById('fallback-api-key');
-            input.placeholder = provider === 'groq' ? 'gsk_...' : 'sk-or-v1-...';
+            if (provider === 'gemini') input.placeholder = 'AIzaSy...';
+            else if (provider === 'groq') input.placeholder = 'gsk_...';
+            else input.placeholder = 'sk-or-v1-...';
         }
 
         function saveFallbackSettings() {
@@ -1557,12 +1560,16 @@ ${source.slice(0, 50000)}
             let url = '';
             let payload = {};
             let headers = {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
+                'Content-Type': 'application/json'
             };
 
-            if (provider === 'groq') {
+            if (provider === 'gemini') {
+                url = `https://generativelanguage.googleapis.com/${CONFIG.GEMINI_API_VERSION}/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                payload = { contents: [{ parts: [{text: promptText}] }] };
+                if (useJsonFormat) payload.generationConfig = { responseMimeType: "application/json" };
+            } else if (provider === 'groq') {
                 url = 'https://api.groq.com/openai/v1/chat/completions';
+                headers['Authorization'] = `Bearer ${apiKey}`;
                 payload = {
                     model: 'llama-3.1-8b-instant',
                     messages: [{ role: 'user', content: promptText }]
@@ -1570,6 +1577,7 @@ ${source.slice(0, 50000)}
                 if (useJsonFormat) payload.response_format = { type: 'json_object' };
             } else if (provider === 'openrouter') {
                 url = 'https://openrouter.ai/api/v1/chat/completions';
+                headers['Authorization'] = `Bearer ${apiKey}`;
                 headers['HTTP-Referer'] = window.location.href;
                 headers['X-Title'] = 'Lumina Reader';
                 payload = {
@@ -1583,10 +1591,17 @@ ${source.slice(0, 50000)}
 
             if (!response.ok) {
                 const errMsg = data.error?.message || `Erro na API ${provider}`;
+                if (errMsg.toLowerCase().includes('too large') || errMsg.toLowerCase().includes('tokens per minute')) {
+                    throw new Error(`Texto gigante demais! A cota gratuita da ${provider.toUpperCase()} (limite de tokens) estourou com este tamanho de texto. Dica: Altere o Provedor para "Google Gemini" na engrenagem ⚙️ e cole uma chave do Google AI Studio para ler textos gigantes.`);
+                }
                 throw new Error(errMsg);
             }
 
-            return data.choices?.[0]?.message?.content || "";
+            if (provider === 'gemini') {
+                return data.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || "";
+            } else {
+                return data.choices?.[0]?.message?.content || "";
+            }
         }
 
         // --- AI Web Crawler ---
