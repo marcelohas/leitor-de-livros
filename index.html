@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="application-version" content="mira-chat-2026-07-24.2">
+    <meta name="application-version" content="web-import-2026-07-24.3">
     <title>Lumina Reader AI</title>
     
     <!-- Tailwind CSS -->
@@ -228,7 +228,7 @@
                     <div class="flex border border-indigo-600 rounded shadow-sm overflow-hidden shrink-0">
                         <label class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors border-r border-indigo-500 flex items-center">
                             <i class="fa-solid fa-upload mr-1"></i> Arquivo
-                            <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls">
+                            <input type="file" id="file-input" class="hidden" accept=".pdf,.epub,.docx,.doc,.txt,.xlsx,.xls,.html,.htm">
                         </label>
                         <button onclick="loadFromUrlPrompt()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-sm font-medium transition-colors flex items-center" title="Abrir livro por link" aria-label="Abrir livro por link">
                             <i class="fa-solid fa-link"></i>
@@ -1120,20 +1120,25 @@ ${source.slice(0, 50000)}
             return blob;
         }
 
-        function showUrlImportFallback(url) {
+        function showUrlImportFallback(url, resourceType = 'file') {
             const textLayer = document.getElementById('text-layer');
             textLayer.innerHTML = '';
+            const isWebPage = resourceType === 'web';
 
             const panel = document.createElement('div');
             panel.className = 'max-w-xl mx-auto my-10 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-gray-700 shadow-sm';
 
             const title = document.createElement('h2');
             title.className = 'text-xl font-bold text-gray-900 mb-3';
-            title.textContent = 'O site de origem bloqueou a importação direta';
+            title.textContent = isWebPage
+                ? 'O site bloqueou a leitura automática desta página'
+                : 'O site de origem bloqueou a importação direta';
 
             const explanation = document.createElement('p');
             explanation.className = 'mb-5 leading-relaxed';
-            explanation.textContent = 'Este PDF pode ser aberto normalmente, mas o servidor não permite que outro site o baixe automaticamente. Abra o arquivo, salve-o e selecione-o abaixo. Depois do carregamento, o botão MIRA será ativado.';
+            explanation.textContent = isWebPage
+                ? 'Este endereço é uma página web, não um PDF. Ela pode ser aberta normalmente, mas o servidor impede que o leitor copie seu conteúdo automaticamente. Abra a página e salve-a como HTML, ou copie o texto e cole abaixo.'
+                : 'Este arquivo pode ser aberto normalmente, mas o servidor não permite que outro site o baixe automaticamente. Abra o arquivo, salve-o e selecione-o abaixo. Depois do carregamento, o botão MIRA será ativado.';
 
             const actions = document.createElement('div');
             actions.className = 'flex flex-wrap gap-3';
@@ -1143,21 +1148,62 @@ ${source.slice(0, 50000)}
             openLink.target = '_blank';
             openLink.rel = 'noopener noreferrer';
             openLink.className = 'inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700';
-            openLink.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir PDF para baixar';
+            openLink.innerHTML = isWebPage
+                ? '<i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir página original'
+                : '<i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir arquivo para baixar';
 
             const uploadLabel = document.createElement('label');
             uploadLabel.className = 'inline-flex cursor-pointer items-center gap-2 rounded-lg border border-cyan-300 bg-white px-4 py-2 text-sm font-semibold text-cyan-700 hover:bg-cyan-50';
-            uploadLabel.innerHTML = '<i class="fa-solid fa-upload"></i> Selecionar PDF baixado';
+            uploadLabel.innerHTML = isWebPage
+                ? '<i class="fa-solid fa-upload"></i> Selecionar página salva'
+                : '<i class="fa-solid fa-upload"></i> Selecionar arquivo baixado';
 
             const uploadInput = document.createElement('input');
             uploadInput.type = 'file';
-            uploadInput.accept = '.pdf,.epub,.docx,.doc,.txt,.xlsx,.xls';
+            uploadInput.accept = isWebPage
+                ? '.html,.htm,.txt'
+                : '.pdf,.epub,.docx,.doc,.txt,.xlsx,.xls,.html,.htm';
             uploadInput.className = 'hidden';
             uploadInput.addEventListener('change', () => handleFileSelection(uploadInput.files[0]));
             uploadLabel.appendChild(uploadInput);
 
             actions.append(openLink, uploadLabel);
             panel.append(title, explanation, actions);
+
+            if (isWebPage) {
+                const pasteArea = document.createElement('div');
+                pasteArea.className = 'mt-5 border-t border-amber-200 pt-5';
+
+                const pasteLabel = document.createElement('label');
+                pasteLabel.className = 'block text-sm font-semibold text-gray-800 mb-2';
+                pasteLabel.textContent = 'Ou cole aqui o texto copiado da página';
+
+                const textarea = document.createElement('textarea');
+                textarea.rows = 6;
+                textarea.placeholder = 'Selecione o conteúdo na página original, copie e cole aqui...';
+                textarea.className = 'w-full rounded-xl border border-amber-200 bg-white p-3 text-sm leading-relaxed focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-100';
+
+                const importTextButton = document.createElement('button');
+                importTextButton.type = 'button';
+                importTextButton.className = 'mt-3 inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500';
+                importTextButton.innerHTML = '<i class="fa-solid fa-book-open"></i> Carregar texto no leitor';
+                importTextButton.addEventListener('click', () => {
+                    const pastedText = textarea.value.trim();
+                    if (pastedText.length < 20) {
+                        textarea.focus();
+                        textarea.setCustomValidity('Cole um trecho maior do conteúdo da página.');
+                        textarea.reportValidity();
+                        return;
+                    }
+                    textarea.setCustomValidity('');
+                    const hostName = new URL(url).hostname.replace(/^www\./, '').replace(/[^\w.-]+/g, '_');
+                    const file = new File([pastedText], `${hostName}_conteudo.txt`, { type: 'text/plain' });
+                    handleFileSelection(file);
+                });
+
+                pasteArea.append(pasteLabel, textarea, importTextButton);
+                panel.appendChild(pasteArea);
+            }
             textLayer.appendChild(panel);
         }
 
@@ -1180,7 +1226,9 @@ ${source.slice(0, 50000)}
             document.getElementById('text-layer').style.display = 'block';
             
             try {
-                const expectedExtension = parsedUrl.pathname.split('.').pop().toLowerCase();
+                const supportedExtensions = ['pdf', 'epub', 'docx', 'doc', 'txt', 'xlsx', 'xls', 'html', 'htm'];
+                const pathExtension = parsedUrl.pathname.split('.').pop().toLowerCase();
+                const expectedExtension = supportedExtensions.includes(pathExtension) ? pathExtension : 'html';
                 const routes = [
                     `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
                     `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
@@ -1227,7 +1275,7 @@ ${source.slice(0, 50000)}
                 // Se for uma página HTML, pergunta se o usuário quer varrer o site ou só aquela página
                 if (ext === 'html' || ext === 'htm') {
                     const htmlContent = await file.text();
-                    const querLivro = confirm("Este link é uma página web.\n\nVocê deseja tentar baixar APENAS esta página ou pedir para a IA tentar encontrar e baixar TODOS OS CAPÍTULOS do livro a partir deste site?");
+                    const querLivro = confirm("Este link é uma página web.\n\nClique em OK para pedir à IA que tente localizar TODOS OS CAPÍTULOS.\nClique em Cancelar para carregar apenas esta página.");
                     if (querLivro) {
                         // Verifica se está logado para usar o Gemini
                         if (!state.apiKey && !state.googleAccessToken) {
@@ -1243,7 +1291,9 @@ ${source.slice(0, 50000)}
                 
             } catch (error) {
                 console.error(error);
-                showUrlImportFallback(parsedUrl.href);
+                const pathExtension = parsedUrl.pathname.split('.').pop().toLowerCase();
+                const downloadableExtensions = ['pdf', 'epub', 'docx', 'doc', 'txt', 'xlsx', 'xls'];
+                showUrlImportFallback(parsedUrl.href, downloadableExtensions.includes(pathExtension) ? 'file' : 'web');
             }
         }
 
